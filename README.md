@@ -1,1 +1,1 @@
-# mafia-game
+# Mafia Game

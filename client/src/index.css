@@ -1,0 +1,614 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  --color-bg: #0a0a0f;
+  --color-bg-card: #12121a;
+  --color-bg-elevated: #1a1a24;
+  --color-primary: #c9a227;
+  --color-primary-glow: rgba(201, 162, 39, 0.3);
+  --color-danger: #8b0000;
+  --color-danger-glow: rgba(139, 0, 0, 0.4);
+  --color-success: #2d5a27;
+  --color-text: #e8e8e8;
+  --color-text-muted: #888;
+  --color-border: #2a2a35;
+  --font-display: 'Cinzel', serif;
+  --font-body: 'Inter', sans-serif;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --shadow-glow: 0 0 40px rgba(201, 162, 39, 0.15);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(ellipse at 20% 20%, rgba(201, 162, 39, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(139, 0, 0, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 32px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  width: 100%;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-primary), #a88620);
+  color: #0a0a0f;
+  box-shadow: 0 4px 20px var(--color-primary-glow);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 30px var(--color-primary-glow);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover {
+  background: var(--color-bg-card);
+  border-color: var(--color-primary);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--color-danger), #6a0000);
+  color: var(--color-text);
+  box-shadow: 0 4px 20px var(--color-danger-glow);
+}
+
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-glow);
+}
+
+.input {
+  width: 100%;
+  padding: 16px 20px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  transition: border-color 0.3s ease;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-group label {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 40px 20px;
+}
+
+.page-center {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 20px var(--color-primary-glow); }
+  50% { box-shadow: 0 0 40px var(--color-primary-glow), 0 0 60px var(--color-primary-glow); }
+}
+
+.animate-in {
+  animation: fadeIn 0.5s ease forwards;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+.home-page {
+  padding-top: 80px;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-shadow: 0 0 40px var(--color-primary-glow);
+  margin-bottom: 8px;
+  letter-spacing: 0.1em;
+}
+
+.tagline {
+  color: var(--color-text-muted);
+  font-size: 16px;
+  margin-bottom: 60px;
+  font-style: italic;
+}
+
+.home-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+  animation: fadeIn 0.3s ease;
+}
+
+.modal {
+  width: 100%;
+  max-width: 400px;
+  animation: fadeIn 0.3s ease;
+}
+
+.modal h2 {
+  margin-bottom: 24px;
+  color: var(--color-primary);
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.modal-buttons .btn {
+  flex: 1;
+}
+
+.create-page {
+  padding-top: 40px;
+}
+
+.create-page h1 {
+  text-align: center;
+  color: var(--color-primary);
+  margin-bottom: 8px;
+  font-size: 28px;
+}
+
+.create-subtitle {
+  text-align: center;
+  color: var(--color-text-muted);
+  margin-bottom: 32px;
+}
+
+.role-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.role-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.role-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.role-icon {
+  font-size: 28px;
+}
+
+.role-name {
+  font-weight: 500;
+}
+
+.role-counter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.role-counter button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.role-counter button:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.role-counter button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.role-counter span {
+  font-size: 20px;
+  font-weight: 600;
+  min-width: 24px;
+  text-align: center;
+}
+
+.player-count {
+  text-align: center;
+  padding: 16px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  margin-bottom: 24px;
+}
+
+.player-count-label {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.player-count-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--color-primary);
+  font-family: var(--font-display);
+}
+
+.lobby-page {
+  padding-top: 40px;
+}
+
+.room-code-display {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.room-code-label {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+
+.room-code {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: 0.2em;
+  text-shadow: 0 0 30px var(--color-primary-glow);
+}
+
+.players-section h2 {
+  font-size: 18px;
+  color: var(--color-text-muted);
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.player-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  animation: fadeIn 0.3s ease;
+}
+
+.player-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-primary), #a88620);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: #0a0a0f;
+  font-size: 18px;
+}
+
+.player-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.player-host {
+  font-size: 12px;
+  color: var(--color-primary);
+  background: rgba(201, 162, 39, 0.1);
+  padding: 4px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.waiting-status {
+  text-align: center;
+  padding: 24px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.waiting-status span {
+  animation: pulse 1.5s ease-in-out infinite;
+  display: inline-block;
+}
+
+.role-page {
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+.role-reveal-container {
+  text-align: center;
+  animation: fadeIn 1s ease;
+}
+
+.role-reveal-intro {
+  font-size: 18px;
+  color: var(--color-text-muted);
+  margin-bottom: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+.role-card {
+  padding: 48px 32px;
+  margin-bottom: 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.role-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, var(--color-primary-glow) 0%, transparent 70%);
+  animation: float 4s ease-in-out infinite;
+}
+
+.role-icon-large {
+  font-size: 80px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
+  animation: float 3s ease-in-out infinite;
+}
+
+.role-title {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  position: relative;
+  z-index: 1;
+  margin-bottom: 16px;
+}
+
+.role-mafia .role-title {
+  color: #ff4444;
+  text-shadow: 0 0 30px rgba(255, 68, 68, 0.5);
+}
+
+.role-doktor .role-title {
+  color: #44ff88;
+  text-shadow: 0 0 30px rgba(68, 255, 136, 0.5);
+}
+
+.role-kurva .role-title {
+  color: #ff44ff;
+  text-shadow: 0 0 30px rgba(255, 68, 255, 0.5);
+}
+
+.role-policajac .role-title {
+  color: #4488ff;
+  text-shadow: 0 0 30px rgba(68, 136, 255, 0.5);
+}
+
+.role-civil .role-title {
+  color: var(--color-text);
+}
+
+.role-description {
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1.6;
+  position: relative;
+  z-index: 1;
+}
+
+.role-warning {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  font-size: 14px;
+}
+
+.back-button {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: 24px;
+  transition: all 0.2s ease;
+  z-index: 50;
+}
+
+.back-button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+@media (min-width: 768px) {
+  .logo {
+    font-size: 64px;
+  }
+  
+  .home-buttons {
+    flex-direction: row;
+    max-width: 400px;
+  }
+  
+  .role-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .container {
+    max-width: 600px;
+  }
+}
