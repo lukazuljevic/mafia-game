@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId, updateHostId, getAvailableGames } from './gameManager';
+import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId, updateHostId, getAvailableGames, isHostOfAnyGame, deleteGame } from './gameManager';
 import { RoleConfig } from './types';
 
 const app = express();
@@ -32,6 +32,10 @@ io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
   socket.on('create-game', (roleConfig: RoleConfig, callback) => {
+    if (isHostOfAnyGame(socket.id)) {
+      callback({ success: false, error: 'Already hosting a game' });
+      return;
+    }
     const game = createGame(socket.id, roleConfig);
     socket.join(game.code);
     playerRooms.set(socket.id, game.code);
@@ -39,6 +43,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-game', ({ code, name }: { code: string; name: string }, callback) => {
+    if (isHostOfAnyGame(socket.id)) {
+      callback({ success: false, error: 'Cannot join as player while hosting a game' });
+      return;
+    }
     const game = joinGame(code, { id: socket.id, name });
     if (!game) {
       callback({ success: false, error: 'Game not found or already started' });
@@ -188,6 +196,51 @@ io.on('connection', (socket) => {
   socket.on('get-available-games', (callback) => {
     const games = getAvailableGames();
     callback({ success: true, games });
+  });
+
+  socket.on('leave-game', ({ code }: { code: string }, callback) => {
+    const game = getGame(code);
+    if (!game) {
+      callback({ success: false, error: 'Game not found' });
+      return;
+    }
+    
+    if (game.hostId === socket.id) {
+      callback({ success: false, error: 'Host cannot leave, use delete-game instead' });
+      return;
+    }
+
+    const updatedGame = removePlayer(code, socket.id);
+    if (updatedGame) {
+      socket.leave(code.toUpperCase());
+      playerRooms.delete(socket.id);
+      io.to(code.toUpperCase()).emit('player-left', { 
+        players: updatedGame.players.map(p => ({ id: p.id, name: p.name })) 
+      });
+    }
+    
+    callback({ success: true });
+  });
+
+  socket.on('delete-game', ({ code }: { code: string }, callback) => {
+    const game = getGame(code);
+    if (!game) {
+      callback({ success: false, error: 'Game not found' });
+      return;
+    }
+    
+    if (game.hostId !== socket.id) {
+      callback({ success: false, error: 'Only host can delete the game' });
+      return;
+    }
+
+    io.to(code.toUpperCase()).emit('game-deleted', {});
+    
+    deleteGame(code);
+    socket.leave(code.toUpperCase());
+    playerRooms.delete(socket.id);
+    
+    callback({ success: true });
   });
 
   socket.on('disconnect', () => {

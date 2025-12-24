@@ -133,7 +133,24 @@ export function getAvailableGames(): { code: string; playerCount: number; totalS
   return available;
 }
 
-export function deleteGame(code: string): void {
-  games.delete(code.toUpperCase());
+export function isHostOfAnyGame(hostId: string): boolean {
+  for (const game of games.values()) {
+    if (game.hostId === hostId) {
+      return true;
+    }
+  }
+  return false;
 }
 
+export function getGameByHostId(hostId: string): Game | null {
+  for (const game of games.values()) {
+    if (game.hostId === hostId) {
+      return game;
+    }
+  }
+  return null;
+}
+
+export function deleteGame(code: string): boolean {
+  return games.delete(code.toUpperCase());
+}

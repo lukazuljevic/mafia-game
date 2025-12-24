@@ -206,11 +206,17 @@ export default function LobbyPage() {
       setGameStarted(false);
     });
 
+    socket.on('game-deleted', () => {
+      clearSession();
+      navigate('/');
+    });
+
     return () => {
       socket.off('player-joined');
       socket.off('player-left');
       socket.off('game-started');
       socket.off('game-restarted');
+      socket.off('game-deleted');
     };
   }, [socket, code, navigate]);
 
@@ -231,6 +237,32 @@ export default function LobbyPage() {
     
     socket.emit('restart-game', code, (response: { success: boolean; error?: string }) => {
       if (!response.success) {
+        console.error(response.error);
+      }
+    });
+  };
+
+  const handleLeaveGame = () => {
+    if (!socket || !code) return;
+    
+    socket.emit('leave-game', { code }, (response: { success: boolean; error?: string }) => {
+      if (response.success) {
+        clearSession();
+        navigate('/');
+      } else {
+        console.error(response.error);
+      }
+    });
+  };
+
+  const handleDeleteGame = () => {
+    if (!socket || !code) return;
+    
+    socket.emit('delete-game', { code }, (response: { success: boolean; error?: string }) => {
+      if (response.success) {
+        clearSession();
+        navigate('/');
+      } else {
         console.error(response.error);
       }
     });
@@ -259,7 +291,11 @@ export default function LobbyPage() {
 
   return (
     <div className="page lobby-page">
-      <button className="back-button" onClick={() => { clearSession(); navigate('/'); }}>←</button>
+      {isHost ? (
+        <button className="back-button" onClick={handleDeleteGame} title="Izbriši sobu">🗑️</button>
+      ) : (
+        <button className="back-button" onClick={handleLeaveGame}>←</button>
+      )}
       
       <div className="container">
         <div className="room-code-display">
