@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import path from 'path';
 import { createGame, getGame, joinGame, removePlayer, startGame, getPlayerRole } from './gameManager';
 import { RoleConfig } from './types';
 
@@ -16,6 +17,12 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '../public')));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/socket.io')) return next();
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
 
 const playerRooms: Map<string, string> = new Map();
 
