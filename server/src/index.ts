@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId } from './gameManager';
+import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId, updateHostId } from './gameManager';
 import { RoleConfig } from './types';
 
 const app = express();
@@ -94,6 +94,29 @@ io.on('connection', (socket) => {
         hostId: result.game.hostId
       },
       role: result.role
+    });
+  });
+
+  socket.on('reconnect-host', ({ code }: { code: string }, callback) => {
+    const game = updateHostId(code, socket.id);
+    if (!game) {
+      callback({ success: false, error: 'Game not found' });
+      return;
+    }
+
+    socket.join(code.toUpperCase());
+    playerRooms.set(socket.id, code.toUpperCase());
+    
+    callback({
+      success: true,
+      game: {
+        code: game.code,
+        players: game.players.map(p => ({ id: p.id, name: p.name })),
+        roleConfig: game.roleConfig,
+        started: game.started,
+        isHost: true,
+        hostId: game.hostId
+      }
     });
   });
 

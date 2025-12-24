@@ -104,6 +104,14 @@ export function updatePlayerId(code: string, playerName: string, newPlayerId: st
   return { game, role: player.role || null, isHost };
 }
 
+export function updateHostId(code: string, newHostId: string): Game | null {
+  const game = games.get(code.toUpperCase());
+  if (!game) return null;
+  
+  game.hostId = newHostId;
+  return game;
+}
+
 export function deleteGame(code: string): void {
   games.delete(code.toUpperCase());
 }

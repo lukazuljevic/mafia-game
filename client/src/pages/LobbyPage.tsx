@@ -24,8 +24,22 @@ const ROLE_ICONS: Record<string, string> = {
   civil: '👤'
 };
 
-function saveSession(code: string, playerName: string) {
-  localStorage.setItem('mafia-session', JSON.stringify({ code, playerName }));
+function savePlayerSession(code: string, playerName: string) {
+  localStorage.setItem('mafia-session', JSON.stringify({ code, playerName, isHost: false }));
+}
+
+function saveHostSession(code: string) {
+  localStorage.setItem('mafia-session', JSON.stringify({ code, isHost: true }));
+}
+
+function getSession(): { code: string; playerName?: string; isHost: boolean } | null {
+  try {
+    const saved = localStorage.getItem('mafia-session');
+    if (!saved) return null;
+    return JSON.parse(saved);
+  } catch {
+    return null;
+  }
 }
 
 function clearSession() {
@@ -46,53 +60,91 @@ export default function LobbyPage() {
   const [copied, setCopied] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
   const [myName, setMyName] = useState<string | null>(location.state?.playerName || null);
+  const [reconnected, setReconnected] = useState(false);
 
   const totalSlots = roleConfig 
     ? roleConfig.mafia + roleConfig.doktor + roleConfig.kurva + roleConfig.policajac + roleConfig.civil
     : 0;
 
   useEffect(() => {
-    if (code && myName) {
-      saveSession(code, myName);
+    if (!code) return;
+    
+    if (isHost) {
+      saveHostSession(code);
+    } else if (myName) {
+      savePlayerSession(code, myName);
     }
-  }, [code, myName]);
+  }, [code, myName, isHost]);
 
   useEffect(() => {
-    if (!socket || !code || !isConnected) return;
+    if (!socket || !code || !isConnected || reconnected) return;
 
-    const savedSession = localStorage.getItem('mafia-session');
-    if (savedSession && !isHost) {
-      try {
-        const { code: savedCode, playerName } = JSON.parse(savedSession);
-        if (savedCode === code && playerName) {
-          socket.emit('reconnect-player', { code, playerName }, (response: {
-            success: boolean;
-            game?: {
-              players: Player[];
-              roleConfig: RoleConfig;
-              started: boolean;
-              isHost: boolean;
-              hostId: string;
-            };
-            role?: string;
-          }) => {
-            if (response.success && response.game) {
-              setPlayers(response.game.players);
-              setRoleConfig(response.game.roleConfig);
-              setIsHost(response.game.isHost);
-              setHostId(response.game.hostId);
-              setGameStarted(response.game.started);
-              setMyName(playerName);
-              
-              if (response.game.started && response.role) {
-                navigate(`/role/${code}`, { state: { role: response.role, isHost: false } });
-              }
-              return;
+    const session = getSession();
+    
+    if (session && session.code === code) {
+      if (session.isHost) {
+        socket.emit('reconnect-host', { code }, (response: {
+          success: boolean;
+          game?: {
+            players: Player[];
+            roleConfig: RoleConfig;
+            started: boolean;
+            isHost: boolean;
+            hostId: string;
+          };
+        }) => {
+          if (response.success && response.game) {
+            setPlayers(response.game.players);
+            setRoleConfig(response.game.roleConfig);
+            setIsHost(true);
+            setHostId(response.game.hostId);
+            setGameStarted(response.game.started);
+            setReconnected(true);
+            
+            if (response.game.started) {
+              socket.emit('get-all-roles', code, (rolesResponse: { success: boolean; roles?: { name: string; role: string }[] }) => {
+                if (rolesResponse.success && rolesResponse.roles) {
+                  setPlayers(prev => prev.map(p => {
+                    const roleInfo = rolesResponse.roles?.find(r => r.name === p.name);
+                    return roleInfo ? { ...p, role: roleInfo.role } : p;
+                  }));
+                }
+              });
             }
-          });
-        }
-      } catch {
-        clearSession();
+            return;
+          }
+          setReconnected(true);
+        });
+        return;
+      } else if (session.playerName) {
+        socket.emit('reconnect-player', { code, playerName: session.playerName }, (response: {
+          success: boolean;
+          game?: {
+            players: Player[];
+            roleConfig: RoleConfig;
+            started: boolean;
+            isHost: boolean;
+            hostId: string;
+          };
+          role?: string;
+        }) => {
+          if (response.success && response.game) {
+            setPlayers(response.game.players);
+            setRoleConfig(response.game.roleConfig);
+            setIsHost(response.game.isHost);
+            setHostId(response.game.hostId);
+            setGameStarted(response.game.started);
+            setMyName(session.playerName!);
+            setReconnected(true);
+            
+            if (response.game.started && response.role) {
+              navigate(`/role/${code}`, { state: { role: response.role, isHost: false } });
+            }
+            return;
+          }
+          setReconnected(true);
+        });
+        return;
       }
     }
 
@@ -116,7 +168,12 @@ export default function LobbyPage() {
         const me = response.game.players.find(p => p.id === socket.id);
         if (me) setMyName(me.name);
       }
+      setReconnected(true);
     });
+  }, [socket, code, navigate, isConnected, reconnected]);
+
+  useEffect(() => {
+    if (!socket || !code) return;
 
     socket.on('player-joined', ({ players: newPlayers, hostId: newHostId }: { players: Player[]; hostId: string }) => {
       setPlayers(newPlayers);
@@ -155,7 +212,7 @@ export default function LobbyPage() {
       socket.off('game-started');
       socket.off('game-restarted');
     };
-  }, [socket, code, navigate, isConnected, isHost]);
+  }, [socket, code, navigate]);
 
   const handleStartGame = () => {
     if (!socket || !code) return;
