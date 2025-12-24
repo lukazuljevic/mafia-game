@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles } from './gameManager';
+import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId } from './gameManager';
 import { RoleConfig } from './types';
 
 const app = express();
@@ -25,6 +25,8 @@ app.get('{*splat}', (req, res, next) => {
 });
 
 const playerRooms: Map<string, string> = new Map();
+const disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+const DISCONNECT_GRACE_PERIOD = 30 * 60 * 1000; // 30 minutes
 
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
@@ -60,6 +62,38 @@ io.on('connection', (socket) => {
         isHost: gameData?.hostId === socket.id,
         hostId: gameData?.hostId
       } 
+    });
+  });
+
+  socket.on('reconnect-player', ({ code, playerName }: { code: string; playerName: string }, callback) => {
+    const result = updatePlayerId(code, playerName, socket.id);
+    if (!result) {
+      callback({ success: false, error: 'Player not found in game' });
+      return;
+    }
+
+    const timerKey = `${code}-${playerName}`;
+    const existingTimer = disconnectTimers.get(timerKey);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      disconnectTimers.delete(timerKey);
+      console.log(`Reconnect: cancelled removal timer for ${playerName}`);
+    }
+
+    socket.join(code.toUpperCase());
+    playerRooms.set(socket.id, code.toUpperCase());
+    
+    callback({
+      success: true,
+      game: {
+        code: result.game.code,
+        players: result.game.players.map(p => ({ id: p.id, name: p.name })),
+        roleConfig: result.game.roleConfig,
+        started: result.game.started,
+        isHost: result.isHost,
+        hostId: result.game.hostId
+      },
+      role: result.role
     });
   });
 
@@ -132,11 +166,26 @@ io.on('connection', (socket) => {
     console.log(`Player disconnected: ${socket.id}`);
     const roomCode = playerRooms.get(socket.id);
     if (roomCode) {
-      const game = removePlayer(roomCode, socket.id);
+      const game = getGame(roomCode);
       if (game) {
-        io.to(roomCode).emit('player-left', { 
-          players: game.players.map(p => ({ id: p.id, name: p.name })) 
-        });
+        const player = game.players.find(p => p.id === socket.id);
+        if (player) {
+          const timerKey = `${roomCode}-${player.name}`;
+          console.log(`Starting ${DISCONNECT_GRACE_PERIOD/1000}s removal timer for ${player.name}`);
+          
+          const timer = setTimeout(() => {
+            console.log(`Grace period expired, removing ${player.name}`);
+            const updatedGame = removePlayer(roomCode, socket.id);
+            if (updatedGame) {
+              io.to(roomCode).emit('player-left', { 
+                players: updatedGame.players.map(p => ({ id: p.id, name: p.name })) 
+              });
+            }
+            disconnectTimers.delete(timerKey);
+          }, DISCONNECT_GRACE_PERIOD);
+          
+          disconnectTimers.set(timerKey, timer);
+        }
       }
       playerRooms.delete(socket.id);
     }

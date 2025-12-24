@@ -91,6 +91,20 @@ export function getAllRoles(code: string, hostId: string): { name: string; role:
   return game.players.map(p => ({ name: p.name, role: p.role || 'unknown' }));
 }
 
+export function updatePlayerId(code: string, playerName: string, newPlayerId: string): { game: Game; role: string | null; isHost: boolean } | null {
+  const game = games.get(code.toUpperCase());
+  if (!game) return null;
+  
+  const player = game.players.find(p => p.name === playerName);
+  if (!player) return null;
+  
+  player.id = newPlayerId;
+  const isHost = game.hostId === newPlayerId;
+  
+  return { game, role: player.role || null, isHost };
+}
+
 export function deleteGame(code: string): void {
   games.delete(code.toUpperCase());
 }
+

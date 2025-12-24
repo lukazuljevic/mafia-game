@@ -24,11 +24,19 @@ const ROLE_ICONS: Record<string, string> = {
   civil: '👤'
 };
 
+function saveSession(code: string, playerName: string) {
+  localStorage.setItem('mafia-session', JSON.stringify({ code, playerName }));
+}
+
+function clearSession() {
+  localStorage.removeItem('mafia-session');
+}
+
 export default function LobbyPage() {
   const { code } = useParams<{ code: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { socket } = useSocket();
+  const { socket, isConnected } = useSocket();
   
   const [players, setPlayers] = useState<Player[]>([]);
   const [isHost, setIsHost] = useState(location.state?.isHost || false);
@@ -37,13 +45,56 @@ export default function LobbyPage() {
   const [isStarting, setIsStarting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
+  const [myName, setMyName] = useState<string | null>(location.state?.playerName || null);
 
   const totalSlots = roleConfig 
     ? roleConfig.mafia + roleConfig.doktor + roleConfig.kurva + roleConfig.policajac + roleConfig.civil
     : 0;
 
   useEffect(() => {
-    if (!socket || !code) return;
+    if (code && myName) {
+      saveSession(code, myName);
+    }
+  }, [code, myName]);
+
+  useEffect(() => {
+    if (!socket || !code || !isConnected) return;
+
+    const savedSession = localStorage.getItem('mafia-session');
+    if (savedSession && !isHost) {
+      try {
+        const { code: savedCode, playerName } = JSON.parse(savedSession);
+        if (savedCode === code && playerName) {
+          socket.emit('reconnect-player', { code, playerName }, (response: {
+            success: boolean;
+            game?: {
+              players: Player[];
+              roleConfig: RoleConfig;
+              started: boolean;
+              isHost: boolean;
+              hostId: string;
+            };
+            role?: string;
+          }) => {
+            if (response.success && response.game) {
+              setPlayers(response.game.players);
+              setRoleConfig(response.game.roleConfig);
+              setIsHost(response.game.isHost);
+              setHostId(response.game.hostId);
+              setGameStarted(response.game.started);
+              setMyName(playerName);
+              
+              if (response.game.started && response.role) {
+                navigate(`/role/${code}`, { state: { role: response.role, isHost: false } });
+              }
+              return;
+            }
+          });
+        }
+      } catch {
+        clearSession();
+      }
+    }
 
     socket.emit('get-game-info', code, (response: { 
       success: boolean; 
@@ -61,6 +112,9 @@ export default function LobbyPage() {
         setIsHost(response.game.isHost);
         setHostId(response.game.hostId);
         setGameStarted(response.game.started);
+        
+        const me = response.game.players.find(p => p.id === socket.id);
+        if (me) setMyName(me.name);
       }
     });
 
@@ -75,7 +129,6 @@ export default function LobbyPage() {
 
     socket.on('game-started', ({ role, isHost: playerIsHost }: { role: string | null; isHost: boolean }) => {
       if (playerIsHost) {
-        // Host stays on this page, fetch roles
         socket.emit('get-all-roles', code, (response: { success: boolean; roles?: { name: string; role: string }[] }) => {
           if (response.success && response.roles) {
             setPlayers(prev => prev.map(p => {
@@ -86,7 +139,6 @@ export default function LobbyPage() {
           }
         });
       } else {
-        // Players go to role page
         navigate(`/role/${code}`, { state: { role, isHost: false } });
       }
     });
@@ -103,7 +155,7 @@ export default function LobbyPage() {
       socket.off('game-started');
       socket.off('game-restarted');
     };
-  }, [socket, code, navigate]);
+  }, [socket, code, navigate, isConnected, isHost]);
 
   const handleStartGame = () => {
     if (!socket || !code) return;
@@ -150,7 +202,7 @@ export default function LobbyPage() {
 
   return (
     <div className="page lobby-page">
-      <button className="back-button" onClick={() => navigate('/')}>←</button>
+      <button className="back-button" onClick={() => { clearSession(); navigate('/'); }}>←</button>
       
       <div className="container">
         <div className="room-code-display">
