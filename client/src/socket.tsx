@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:9999';
+const SOCKET_URL = window.location.origin;
 
 interface SocketContextType {
   socket: Socket | null;
