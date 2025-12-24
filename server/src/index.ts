@@ -17,11 +17,11 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../static')));
 
 app.get('{*splat}', (req, res, next) => {
   if (req.path.startsWith('/socket.io')) return next();
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+  res.sendFile(path.join(__dirname, '../static/index.html'));
 });
 
 const playerRooms: Map<string, string> = new Map();
