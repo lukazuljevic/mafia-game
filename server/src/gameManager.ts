@@ -112,6 +112,27 @@ export function updateHostId(code: string, newHostId: string): Game | null {
   return game;
 }
 
+export function getAvailableGames(): { code: string; playerCount: number; totalSlots: number }[] {
+  const available: { code: string; playerCount: number; totalSlots: number }[] = [];
+  
+  games.forEach(game => {
+    if (!game.started) {
+      const totalSlots = game.roleConfig.mafia + game.roleConfig.doktor + 
+        game.roleConfig.kurva + game.roleConfig.policajac + game.roleConfig.civil;
+      
+      if (game.players.length < totalSlots) {
+        available.push({
+          code: game.code,
+          playerCount: game.players.length,
+          totalSlots
+        });
+      }
+    }
+  });
+  
+  return available;
+}
+
 export function deleteGame(code: string): void {
   games.delete(code.toUpperCase());
 }

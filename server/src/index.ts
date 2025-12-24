@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId, updateHostId } from './gameManager';
+import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId, updateHostId, getAvailableGames } from './gameManager';
 import { RoleConfig } from './types';
 
 const app = express();
@@ -183,6 +183,11 @@ io.on('connection', (socket) => {
         hostId: game.hostId
       }
     });
+  });
+
+  socket.on('get-available-games', (callback) => {
+    const games = getAvailableGames();
+    callback({ success: true, games });
   });
 
   socket.on('disconnect', () => {

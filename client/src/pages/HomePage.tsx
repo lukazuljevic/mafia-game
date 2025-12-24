@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../socket';
+
+interface AvailableGame {
+  code: string;
+  playerCount: number;
+  totalSlots: number;
+}
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -10,6 +16,24 @@ export default function HomePage() {
   const [playerName, setPlayerName] = useState('');
   const [error, setError] = useState('');
   const [isJoining, setIsJoining] = useState(false);
+  const [availableGames, setAvailableGames] = useState<AvailableGame[]>([]);
+
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+
+    const fetchGames = () => {
+      socket.emit('get-available-games', (response: { success: boolean; games: AvailableGame[] }) => {
+        if (response.success) {
+          setAvailableGames(response.games);
+        }
+      });
+    };
+
+    fetchGames();
+    const interval = setInterval(fetchGames, 5000);
+
+    return () => clearInterval(interval);
+  }, [socket, isConnected]);
 
   const handleJoin = () => {
     if (!socket || !joinCode.trim() || !playerName.trim()) return;
@@ -27,6 +51,11 @@ export default function HomePage() {
         setIsJoining(false);
       }
     );
+  };
+
+  const handleQuickJoin = (code: string) => {
+    setJoinCode(code);
+    setShowJoinModal(true);
   };
 
   return (
@@ -57,6 +86,24 @@ export default function HomePage() {
         <p style={{ marginTop: '20px', color: 'var(--color-text-muted)' }}>
           Spajanje na server...
         </p>
+      )}
+
+      {isConnected && availableGames.length > 0 && (
+        <div className="available-games animate-in" style={{ animationDelay: '0.4s' }}>
+          <h3>Aktivne sobe</h3>
+          <div className="games-list">
+            {availableGames.map(game => (
+              <button
+                key={game.code}
+                className="game-item"
+                onClick={() => handleQuickJoin(game.code)}
+              >
+                <span className="game-code">{game.code}</span>
+                <span className="game-players">{game.playerCount}/{game.totalSlots} igrača</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {showJoinModal && (
