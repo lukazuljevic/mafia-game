@@ -1,4 +1,6 @@
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useSocket } from '../socket';
 
 type Role = 'mafia' | 'doktor' | 'kurva' | 'policajac' | 'civil';
 
@@ -6,6 +8,11 @@ interface RoleInfo {
   icon: string;
   name: string;
   description: string;
+}
+
+interface PlayerRole {
+  name: string;
+  role: string;
 }
 
 const ROLE_INFO: Record<Role, RoleInfo> = {
@@ -36,10 +43,60 @@ const ROLE_INFO: Record<Role, RoleInfo> = {
   }
 };
 
+const ROLE_ICONS: Record<string, string> = {
+  mafia: '🔫',
+  doktor: '💉',
+  kurva: '💋',
+  policajac: '🔍',
+  civil: '👤'
+};
+
 export default function RolePage() {
+  const { code } = useParams<{ code: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const { socket } = useSocket();
+  
   const role = location.state?.role as Role;
+  const [isHost] = useState(location.state?.isHost || false);
+  const [allRoles, setAllRoles] = useState<PlayerRole[]>([]);
+  const [showRoles, setShowRoles] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
+
+  useEffect(() => {
+    if (!socket || !code) return;
+
+    // Listen for game restart
+    socket.on('game-restarted', () => {
+      navigate(`/lobby/${code}`, { state: { isHost } });
+    });
+
+    // If host, fetch all roles
+    if (isHost) {
+      socket.emit('get-all-roles', code, (response: { success: boolean; roles?: PlayerRole[] }) => {
+        if (response.success && response.roles) {
+          setAllRoles(response.roles);
+        }
+      });
+    }
+
+    return () => {
+      socket.off('game-restarted');
+    };
+  }, [socket, code, isHost, navigate]);
+
+  const handleRestart = () => {
+    if (!socket || !code) return;
+    
+    setIsRestarting(true);
+    socket.emit('restart-game', code, (response: { success: boolean; error?: string }) => {
+      if (!response.success) {
+        console.error(response.error);
+        setIsRestarting(false);
+      }
+      // Navigation will happen via 'game-restarted' event
+    });
+  };
 
   if (!role || !ROLE_INFO[role]) {
     return (
@@ -72,6 +129,41 @@ export default function RolePage() {
           <span>🤫</span>
           <span>Ne pokazuj svoj ekran drugim igračima!</span>
         </div>
+
+        {isHost && (
+          <div className="host-panel">
+            <h3 className="host-panel-title">👑 Host Panel</h3>
+            
+            <button 
+              className="btn btn-secondary"
+              onClick={() => setShowRoles(!showRoles)}
+            >
+              {showRoles ? '🙈 Sakrij uloge' : '👀 Prikaži sve uloge'}
+            </button>
+
+            {showRoles && allRoles.length > 0 && (
+              <div className="all-roles-list">
+                {allRoles.map((player, index) => (
+                  <div key={index} className="role-list-item">
+                    <span className="role-list-icon">{ROLE_ICONS[player.role] || '❓'}</span>
+                    <span className="role-list-name">{player.name}</span>
+                    <span className={`role-list-role role-tag-${player.role}`}>
+                      {player.role.charAt(0).toUpperCase() + player.role.slice(1)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button 
+              className="btn btn-danger"
+              onClick={handleRestart}
+              disabled={isRestarting}
+            >
+              {isRestarting ? '⏳ Restartiram...' : '🔄 Restartaj igru'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

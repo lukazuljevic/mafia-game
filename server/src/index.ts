@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, getPlayerRole } from './gameManager';
+import { createGame, getGame, joinGame, removePlayer, startGame, getPlayerRole, restartGame, getAllRoles } from './gameManager';
 import { RoleConfig } from './types';
 
 const app = express();
@@ -48,7 +48,7 @@ io.on('connection', (socket) => {
     const gameData = getGame(code);
     io.to(code.toUpperCase()).emit('player-joined', { 
       players: gameData?.players.map(p => ({ id: p.id, name: p.name })) || [],
-      isHost: gameData?.hostId === socket.id
+      hostId: gameData?.hostId
     });
     
     callback({ 
@@ -57,7 +57,8 @@ io.on('connection', (socket) => {
         code: code.toUpperCase(), 
         players: gameData?.players.map(p => ({ id: p.id, name: p.name })) || [],
         roleConfig: gameData?.roleConfig,
-        isHost: gameData?.hostId === socket.id
+        isHost: gameData?.hostId === socket.id,
+        hostId: gameData?.hostId
       } 
     });
   });
@@ -70,10 +71,37 @@ io.on('connection', (socket) => {
     }
     
     game.players.forEach(player => {
-      io.to(player.id).emit('game-started', { role: player.role });
+      io.to(player.id).emit('game-started', { 
+        role: player.role,
+        isHost: player.id === game.hostId 
+      });
     });
     
     callback({ success: true });
+  });
+
+  socket.on('restart-game', (code: string, callback) => {
+    const game = restartGame(code, socket.id);
+    if (!game) {
+      callback({ success: false, error: 'Only the host can restart the game' });
+      return;
+    }
+    
+    io.to(code.toUpperCase()).emit('game-restarted', {
+      players: game.players.map(p => ({ id: p.id, name: p.name })),
+      roleConfig: game.roleConfig
+    });
+    
+    callback({ success: true });
+  });
+
+  socket.on('get-all-roles', (code: string, callback) => {
+    const roles = getAllRoles(code, socket.id);
+    if (!roles) {
+      callback({ success: false, error: 'Not authorized or game not started' });
+      return;
+    }
+    callback({ success: true, roles });
   });
 
   socket.on('get-game-info', (code: string, callback) => {
@@ -89,7 +117,8 @@ io.on('connection', (socket) => {
         players: game.players.map(p => ({ id: p.id, name: p.name })),
         roleConfig: game.roleConfig,
         started: game.started,
-        isHost: game.hostId === socket.id
+        isHost: game.hostId === socket.id,
+        hostId: game.hostId
       }
     });
   });

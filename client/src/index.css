@@ -568,6 +568,108 @@ h1, h2, h3 {
   border-radius: var(--radius-md);
   color: var(--color-primary);
   font-size: 14px;
+  margin-bottom: 32px;
+}
+
+/* Host Panel */
+.host-panel {
+  margin-top: 16px;
+  padding: 24px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.host-panel-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--color-primary);
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.all-roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.role-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.role-list-icon {
+  font-size: 24px;
+}
+
+.role-list-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.role-list-role {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.role-tag-mafia {
+  background: rgba(255, 68, 68, 0.2);
+  color: #ff4444;
+}
+
+.role-tag-doktor {
+  background: rgba(68, 255, 136, 0.2);
+  color: #44ff88;
+}
+
+.role-tag-kurva {
+  background: rgba(255, 68, 255, 0.2);
+  color: #ff44ff;
+}
+
+.role-tag-policajac {
+  background: rgba(68, 136, 255, 0.2);
+  color: #4488ff;
+}
+
+.role-tag-civil {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--color-danger), #6a0000);
+  color: var(--color-text);
+  box-shadow: 0 4px 20px var(--color-danger-glow);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 30px var(--color-danger-glow);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .back-button {

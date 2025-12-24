@@ -23,6 +23,7 @@ export default function LobbyPage() {
   
   const [players, setPlayers] = useState<Player[]>([]);
   const [isHost, setIsHost] = useState(location.state?.isHost || false);
+  const [hostId, setHostId] = useState<string | null>(null);
   const [roleConfig, setRoleConfig] = useState<RoleConfig | null>(location.state?.roleConfig || null);
   const [isStarting, setIsStarting] = useState(false);
 
@@ -40,34 +41,43 @@ export default function LobbyPage() {
         roleConfig: RoleConfig;
         isHost: boolean;
         started: boolean;
+        hostId: string;
       } 
     }) => {
       if (response.success && response.game) {
         setPlayers(response.game.players);
         setRoleConfig(response.game.roleConfig);
         setIsHost(response.game.isHost);
+        setHostId(response.game.hostId);
         if (response.game.started) {
           navigate(`/role/${code}`);
         }
       }
     });
 
-    socket.on('player-joined', ({ players: newPlayers }: { players: Player[] }) => {
+    socket.on('player-joined', ({ players: newPlayers, hostId: newHostId }: { players: Player[]; hostId: string }) => {
       setPlayers(newPlayers);
+      if (newHostId) setHostId(newHostId);
     });
 
     socket.on('player-left', ({ players: newPlayers }: { players: Player[] }) => {
       setPlayers(newPlayers);
     });
 
-    socket.on('game-started', ({ role }: { role: string }) => {
-      navigate(`/role/${code}`, { state: { role } });
+    socket.on('game-started', ({ role, isHost: playerIsHost }: { role: string; isHost: boolean }) => {
+      navigate(`/role/${code}`, { state: { role, isHost: playerIsHost } });
+    });
+
+    socket.on('game-restarted', ({ players: newPlayers, roleConfig: newRoleConfig }: { players: Player[]; roleConfig: RoleConfig }) => {
+      setPlayers(newPlayers);
+      setRoleConfig(newRoleConfig);
     });
 
     return () => {
       socket.off('player-joined');
       socket.off('player-left');
       socket.off('game-started');
+      socket.off('game-restarted');
     };
   }, [socket, code, navigate]);
 
@@ -99,13 +109,13 @@ export default function LobbyPage() {
           <h2>Igrači ({players.length}/{totalSlots})</h2>
           
           <div className="players-list">
-            {players.map((player, index) => (
+            {players.map((player) => (
               <div key={player.id} className="player-item">
                 <div className="player-avatar">
                   {player.name.charAt(0).toUpperCase()}
                 </div>
                 <span className="player-name">{player.name}</span>
-                {index === 0 && <span className="player-host">Host</span>}
+                {player.id === hostId && <span className="player-host">Host</span>}
               </div>
             ))}
           </div>

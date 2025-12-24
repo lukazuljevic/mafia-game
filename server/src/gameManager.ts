@@ -83,6 +83,23 @@ export function getPlayerRole(code: string, playerId: string): string | null {
   return player?.role || null;
 }
 
+export function restartGame(code: string, hostId: string): Game | null {
+  const game = games.get(code.toUpperCase());
+  if (!game || game.hostId !== hostId) return null;
+  
+  // Reset all player roles
+  game.players = game.players.map(p => ({ id: p.id, name: p.name }));
+  game.started = false;
+  return game;
+}
+
+export function getAllRoles(code: string, hostId: string): { name: string; role: string }[] | null {
+  const game = games.get(code.toUpperCase());
+  if (!game || game.hostId !== hostId || !game.started) return null;
+  
+  return game.players.map(p => ({ name: p.name, role: p.role || 'unknown' }));
+}
+
 export function deleteGame(code: string): void {
   games.delete(code.toUpperCase());
 }
