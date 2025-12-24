@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, getPlayerRole, restartGame, getAllRoles } from './gameManager';
+import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles } from './gameManager';
 import { RoleConfig } from './types';
 
 const app = express();
@@ -73,8 +73,13 @@ io.on('connection', (socket) => {
     game.players.forEach(player => {
       io.to(player.id).emit('game-started', { 
         role: player.role,
-        isHost: player.id === game.hostId 
+        isHost: false
       });
+    });
+    
+    io.to(game.hostId).emit('game-started', {
+      role: null,
+      isHost: true
     });
     
     callback({ success: true });

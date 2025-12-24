@@ -5,6 +5,7 @@ import { useSocket } from '../socket';
 interface Player {
   id: string;
   name: string;
+  role?: string;
 }
 
 interface RoleConfig {
@@ -14,6 +15,14 @@ interface RoleConfig {
   policajac: number;
   civil: number;
 }
+
+const ROLE_ICONS: Record<string, string> = {
+  mafia: '🔫',
+  doktor: '💉',
+  kurva: '💋',
+  policajac: '🔍',
+  civil: '👤'
+};
 
 export default function LobbyPage() {
   const { code } = useParams<{ code: string }>();
@@ -26,6 +35,8 @@ export default function LobbyPage() {
   const [hostId, setHostId] = useState<string | null>(null);
   const [roleConfig, setRoleConfig] = useState<RoleConfig | null>(location.state?.roleConfig || null);
   const [isStarting, setIsStarting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
 
   const totalSlots = roleConfig 
     ? roleConfig.mafia + roleConfig.doktor + roleConfig.kurva + roleConfig.policajac + roleConfig.civil
@@ -49,9 +60,7 @@ export default function LobbyPage() {
         setRoleConfig(response.game.roleConfig);
         setIsHost(response.game.isHost);
         setHostId(response.game.hostId);
-        if (response.game.started) {
-          navigate(`/role/${code}`);
-        }
+        setGameStarted(response.game.started);
       }
     });
 
@@ -64,13 +73,28 @@ export default function LobbyPage() {
       setPlayers(newPlayers);
     });
 
-    socket.on('game-started', ({ role, isHost: playerIsHost }: { role: string; isHost: boolean }) => {
-      navigate(`/role/${code}`, { state: { role, isHost: playerIsHost } });
+    socket.on('game-started', ({ role, isHost: playerIsHost }: { role: string | null; isHost: boolean }) => {
+      if (playerIsHost) {
+        // Host stays on this page, fetch roles
+        socket.emit('get-all-roles', code, (response: { success: boolean; roles?: { name: string; role: string }[] }) => {
+          if (response.success && response.roles) {
+            setPlayers(prev => prev.map(p => {
+              const roleInfo = response.roles?.find(r => r.name === p.name);
+              return roleInfo ? { ...p, role: roleInfo.role } : p;
+            }));
+            setGameStarted(true);
+          }
+        });
+      } else {
+        // Players go to role page
+        navigate(`/role/${code}`, { state: { role, isHost: false } });
+      }
     });
 
     socket.on('game-restarted', ({ players: newPlayers, roleConfig: newRoleConfig }: { players: Player[]; roleConfig: RoleConfig }) => {
-      setPlayers(newPlayers);
+      setPlayers(newPlayers.map(p => ({ id: p.id, name: p.name })));
       setRoleConfig(newRoleConfig);
+      setGameStarted(false);
     });
 
     return () => {
@@ -93,7 +117,36 @@ export default function LobbyPage() {
     });
   };
 
-  const canStart = players.length === totalSlots && isHost;
+  const handleStopGame = () => {
+    if (!socket || !code) return;
+    
+    socket.emit('restart-game', code, (response: { success: boolean; error?: string }) => {
+      if (!response.success) {
+        console.error(response.error);
+      }
+    });
+  };
+
+  const handleCopyCode = async () => {
+    if (!code) return;
+    
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const textArea = document.createElement('textarea');
+      textArea.value = code;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const canStart = players.length === totalSlots && isHost && !gameStarted;
 
   return (
     <div className="page lobby-page">
@@ -103,6 +156,12 @@ export default function LobbyPage() {
         <div className="room-code-display">
           <div className="room-code-label">Kod sobe</div>
           <div className="room-code animate-glow">{code}</div>
+          
+          <div className="share-buttons">
+            <button className="btn btn-secondary btn-small" onClick={handleCopyCode}>
+              {copied ? '✓ Kopirano!' : '📋 Kopiraj kod'}
+            </button>
+          </div>
         </div>
 
         <div className="players-section">
@@ -116,24 +175,38 @@ export default function LobbyPage() {
                 </div>
                 <span className="player-name">{player.name}</span>
                 {player.id === hostId && <span className="player-host">Host</span>}
+                {gameStarted && isHost && player.role && (
+                  <span className={`player-role role-tag-${player.role}`}>
+                    {ROLE_ICONS[player.role]} {player.role.charAt(0).toUpperCase() + player.role.slice(1)}
+                  </span>
+                )}
               </div>
             ))}
           </div>
 
-          {players.length < totalSlots && (
+          {!gameStarted && players.length < totalSlots && (
             <div className="waiting-status">
               <span>Čekanje igrača...</span>
             </div>
           )}
         </div>
 
-        {isHost && (
+        {isHost && !gameStarted && (
           <button 
             className="btn btn-primary"
             onClick={handleStartGame}
             disabled={!canStart || isStarting}
           >
             {isStarting ? 'Pokrećem...' : canStart ? 'Pokreni Igru' : `Čekaj još ${totalSlots - players.length} igrača`}
+          </button>
+        )}
+
+        {isHost && gameStarted && (
+          <button 
+            className="btn btn-danger"
+            onClick={handleStopGame}
+          >
+            🛑 Zaustavi igru
           </button>
         )}
       </div>

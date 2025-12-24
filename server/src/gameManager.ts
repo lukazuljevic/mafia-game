@@ -1,5 +1,5 @@
 import { Game, Player, RoleConfig } from './types';
-import { distributeRoles, validateRoleConfig } from './roleDistributor';
+import { distributeRoles } from './roleDistributor';
 
 const games: Map<string, Game> = new Map();
 
@@ -75,19 +75,10 @@ export function startGame(code: string, hostId: string): Game | null {
   return game;
 }
 
-export function getPlayerRole(code: string, playerId: string): string | null {
-  const game = games.get(code.toUpperCase());
-  if (!game || !game.started) return null;
-  
-  const player = game.players.find(p => p.id === playerId);
-  return player?.role || null;
-}
-
 export function restartGame(code: string, hostId: string): Game | null {
   const game = games.get(code.toUpperCase());
   if (!game || game.hostId !== hostId) return null;
   
-  // Reset all player roles
   game.players = game.players.map(p => ({ id: p.id, name: p.name }));
   game.started = false;
   return game;
