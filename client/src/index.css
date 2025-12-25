@@ -731,6 +731,16 @@ h1, h2, h3 {
   background: var(--color-bg-card);
 }
 
+.back-arrow-icon {
+  width: 20px;
+  height: 20px;
+  filter: invert(93%) sepia(0%) saturate(0%) hue-rotate(180deg) brightness(93%) contrast(89%);
+}
+
+.back-button:hover .back-arrow-icon {
+  filter: invert(67%) sepia(64%) saturate(446%) hue-rotate(10deg) brightness(91%) contrast(86%);
+}
+
 /* Share buttons */
 .share-buttons {
   display: flex;

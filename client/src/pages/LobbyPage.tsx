@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useSocket } from '../socket';
+import leftArrowSvg from '../assets/left-arrow.svg';
 
 interface Player {
   id: string;
@@ -291,11 +292,12 @@ export default function LobbyPage() {
 
   return (
     <div className="page lobby-page">
-      {isHost ? (
-        <button className="back-button" onClick={handleDeleteGame} title="Izbriši sobu">🗑️</button>
-      ) : (
-        <button className="back-button" onClick={handleLeaveGame}>←</button>
-      )}
+      <button 
+        className="back-button" 
+        onClick={isHost ? handleDeleteGame : handleLeaveGame}
+      >
+        <img src={leftArrowSvg} alt="Nazad" className="back-arrow-icon" />
+      </button>
       
       <div className="container">
         <div className="room-code-display">
