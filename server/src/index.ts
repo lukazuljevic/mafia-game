@@ -276,4 +276,10 @@ io.on('connection', (socket) => {
 const PORT = 9999;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  
+  const { startCleanupInterval } = require('./gameManager');
+  startCleanupInterval((code: string) => {
+    io.to(code.toUpperCase()).emit('game-deleted', {});
+    console.log(`Expired game ${code} deleted and players notified`);
+  });
 });

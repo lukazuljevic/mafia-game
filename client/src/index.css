@@ -700,26 +700,35 @@ h1, h2, h3 {
 
 .back-button {
   position: fixed;
-  top: 20px;
-  left: 20px;
+  top: max(16px, env(safe-area-inset-top, 16px));
+  left: max(16px, env(safe-area-inset-left, 16px));
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: 50%;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: var(--color-text);
-  font-size: 24px;
+  font-size: 20px;
   transition: all 0.2s ease;
-  z-index: 50;
+  z-index: 100;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .back-button:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+}
+
+.back-button:active {
+  transform: scale(0.95);
+  background: var(--color-bg-card);
 }
 
 /* Share buttons */

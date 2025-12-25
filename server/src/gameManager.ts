@@ -154,3 +154,33 @@ export function getGameByHostId(hostId: string): Game | null {
 export function deleteGame(code: string): boolean {
   return games.delete(code.toUpperCase());
 }
+
+const GAME_EXPIRY_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+export function cleanupExpiredGames(): string[] {
+  const now = Date.now();
+  const expired: string[] = [];
+  
+  games.forEach((game, code) => {
+    const gameAge = now - game.createdAt.getTime();
+    if (gameAge > GAME_EXPIRY_MS) {
+      expired.push(code);
+    }
+  });
+  
+  expired.forEach(code => {
+    console.log(`Cleaning up expired game: ${code}`);
+    games.delete(code);
+  });
+  
+  return expired;
+}
+
+export function startCleanupInterval(onGameExpired?: (code: string) => void): NodeJS.Timeout {
+  return setInterval(() => {
+    const expired = cleanupExpiredGames();
+    if (onGameExpired) {
+      expired.forEach(code => onGameExpired(code));
+    }
+  }, 60 * 60 * 1000); // Check every hour
+}
