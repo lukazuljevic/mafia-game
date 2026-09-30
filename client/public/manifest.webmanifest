@@ -1,0 +1,14 @@
+{
+  "name": "Mafia",
+  "short_name": "Mafia",
+  "description": "Party igra Mafia — podijeli uloge prijateljima na mobitelima.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "lang": "hr",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

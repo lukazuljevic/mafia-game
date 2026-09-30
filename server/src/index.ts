@@ -1,285 +1,334 @@
-import express from 'express';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
-import path from 'path';
-import { createGame, getGame, joinGame, removePlayer, startGame, restartGame, getAllRoles, updatePlayerId, updateHostId, getAvailableGames, isHostOfAnyGame, deleteGame } from './gameManager';
-import { RoleConfig } from './types';
+import express from "express";
+import { createServer } from "http";
+import { Server, Socket } from "socket.io";
+import cors from "cors";
+import path from "path";
+import {
+  createGame,
+  getGame,
+  findMembership,
+  joinGame,
+  removePlayer,
+  updateRoles,
+  startGame,
+  restartGame,
+  setDead,
+  getWinner,
+  getAvailableGames,
+  deleteGame,
+  startCleanupInterval,
+} from "./gameManager";
+import {
+  sanitizeClientId,
+  sanitizeCode,
+  sanitizeName,
+  sanitizeRoleConfig,
+} from "./validation";
+import { Game, Player } from "./types";
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
 });
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../static')));
+app.use(express.static(path.join(__dirname, "../static")));
 
-app.get('{*splat}', (req, res, next) => {
-  if (req.path.startsWith('/socket.io')) return next();
-  res.sendFile(path.join(__dirname, '../static/index.html'));
+app.get("{*splat}", (req, res, next) => {
+  if (req.path.startsWith("/socket.io")) return next();
+  res.sendFile(path.join(__dirname, "../static/index.html"));
 });
 
-const playerRooms: Map<string, string> = new Map();
-const disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
-const DISCONNECT_GRACE_PERIOD = 30 * 60 * 1000; // 30 minutes
+type Reply = (response: object) => void;
 
-io.on('connection', (socket) => {
-  console.log(`Player connected: ${socket.id}`);
+// Every device has its own room, so events reach it after any reconnect.
+const clientRoom = (secret: string) => `client:${secret}`;
 
-  socket.on('create-game', (roleConfig: RoleConfig, callback) => {
-    if (isHostOfAnyGame(socket.id)) {
-      callback({ success: false, error: 'Already hosting a game' });
-      return;
-    }
-    const game = createGame(socket.id, roleConfig);
-    socket.join(game.code);
-    playerRooms.set(socket.id, game.code);
-    callback({ success: true, game: { code: game.code, players: game.players, roleConfig: game.roleConfig } });
+function isConnected(secret: string): boolean {
+  return (io.sockets.adapter.rooms.get(clientRoom(secret))?.size ?? 0) > 0;
+}
+
+function hostView(game: Game) {
+  return {
+    code: game.code,
+    isHost: true,
+    started: game.started,
+    roleConfig: game.roleConfig,
+    winner: getWinner(game),
+    players: game.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      connected: isConnected(p.secret),
+      role: p.role ?? null,
+      dead: p.dead,
+    })),
+  };
+}
+
+function playerView(game: Game, me: Player) {
+  return {
+    code: game.code,
+    isHost: false,
+    started: game.started,
+    roleConfig: game.roleConfig,
+    winner: getWinner(game),
+    players: game.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      connected: isConnected(p.secret),
+      dead: p.dead,
+    })),
+    you: { id: me.id, name: me.name, role: me.role ?? null, dead: me.dead },
+  };
+}
+
+function broadcastState(game: Game) {
+  io.to(clientRoom(game.hostSecret)).emit("game-state", hostView(game));
+  game.players.forEach((p) => {
+    io.to(clientRoom(p.secret)).emit("game-state", playerView(game, p));
   });
+}
 
-  socket.on('join-game', ({ code, name }: { code: string; name: string }, callback) => {
-    if (isHostOfAnyGame(socket.id)) {
-      callback({ success: false, error: 'Cannot join as player while hosting a game' });
-      return;
-    }
-    const game = joinGame(code, { id: socket.id, name });
-    if (!game) {
-      callback({ success: false, error: 'Game not found or already started' });
-      return;
-    }
-    socket.join(code.toUpperCase());
-    playerRooms.set(socket.id, code.toUpperCase());
-    
-    const gameData = getGame(code);
-    io.to(code.toUpperCase()).emit('player-joined', { 
-      players: gameData?.players.map(p => ({ id: p.id, name: p.name })) || [],
-      hostId: gameData?.hostId
-    });
-    
-    callback({ 
-      success: true, 
-      game: { 
-        code: code.toUpperCase(), 
-        players: gameData?.players.map(p => ({ id: p.id, name: p.name })) || [],
-        roleConfig: gameData?.roleConfig,
-        isHost: gameData?.hostId === socket.id,
-        hostId: gameData?.hostId
-      } 
-    });
-  });
+function notifyDeleted(game: Game, skipSecret?: string) {
+  const rooms = [game.hostSecret, ...game.players.map((p) => p.secret)]
+    .filter((s) => s !== skipSecret)
+    .map(clientRoom);
+  if (rooms.length) io.to(rooms).emit("game-deleted", {});
+}
 
-  socket.on('reconnect-player', ({ code, playerName }: { code: string; playerName: string }, callback) => {
-    const result = updatePlayerId(code, playerName, socket.id);
-    if (!result) {
-      callback({ success: false, error: 'Player not found in game' });
-      return;
-    }
+function leaveCurrentGame(secret: string) {
+  const membership = findMembership(secret);
+  if (!membership || membership.isHost) return;
+  removePlayer(membership.game, (p) => p.secret === secret);
+  broadcastState(membership.game);
+}
 
-    const timerKey = `${code}-${playerName}`;
-    const existingTimer = disconnectTimers.get(timerKey);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      disconnectTimers.delete(timerKey);
-      console.log(`Reconnect: cancelled removal timer for ${playerName}`);
-    }
+io.use((socket, next) => {
+  const clientId = sanitizeClientId(socket.handshake.auth?.clientId);
+  if (!clientId) return next(new Error("Invalid client id"));
+  socket.data.clientId = clientId;
+  next();
+});
 
-    socket.join(code.toUpperCase());
-    playerRooms.set(socket.id, code.toUpperCase());
-    
-    callback({
-      success: true,
-      game: {
-        code: result.game.code,
-        players: result.game.players.map(p => ({ id: p.id, name: p.name })),
-        roleConfig: result.game.roleConfig,
-        started: result.game.started,
-        isHost: result.isHost,
-        hostId: result.game.hostId
-      },
-      role: result.role
-    });
-  });
+io.on("connection", (socket: Socket) => {
+  const secret: string = socket.data.clientId;
+  console.log(`Client connected: ${socket.id}`);
+  socket.join(clientRoom(secret));
 
-  socket.on('reconnect-host', ({ code }: { code: string }, callback) => {
-    const game = updateHostId(code, socket.id);
-    if (!game) {
-      callback({ success: false, error: 'Game not found' });
-      return;
-    }
+  const membership = findMembership(secret);
+  if (membership) broadcastState(membership.game);
 
-    socket.join(code.toUpperCase());
-    playerRooms.set(socket.id, code.toUpperCase());
-    
-    callback({
-      success: true,
-      game: {
-        code: game.code,
-        players: game.players.map(p => ({ id: p.id, name: p.name })),
-        roleConfig: game.roleConfig,
-        started: game.started,
-        isHost: true,
-        hostId: game.hostId
+  // Wraps a handler so malformed payloads or a missing ack can't crash the server.
+  const on = (event: string, handler: (payload: any, reply: Reply) => void) => {
+    socket.on(event, (...args: unknown[]) => {
+      const last = args[args.length - 1];
+      const reply: Reply = typeof last === "function" ? (last as Reply) : () => {};
+      const payload = typeof args[0] === "function" ? undefined : args[0];
+      try {
+        handler(payload ?? {}, reply);
+      } catch (err) {
+        console.error(`Error handling ${event}:`, err);
+        reply({ success: false, error: "Greška na serveru" });
       }
     });
-  });
+  };
 
-  socket.on('start-game', (code: string, callback) => {
-    const game = startGame(code, socket.id);
+  // Resolves the game from the payload and checks the caller belongs to it.
+  const resolve = (payload: any, reply: Reply, requireHost: boolean) => {
+    const code = sanitizeCode(payload.code);
+    const game = code ? getGame(code) : undefined;
     if (!game) {
-      callback({ success: false, error: 'Cannot start game' });
+      reply({ success: false, error: "Soba ne postoji", gone: true });
+      return null;
+    }
+    const isHost = game.hostSecret === secret;
+    if (requireHost && !isHost) {
+      reply({ success: false, error: "Samo voditelj to može" });
+      return null;
+    }
+    if (!isHost && !game.players.some((p) => p.secret === secret)) {
+      reply({ success: false, error: "Nisi u ovoj sobi", notMember: true, started: game.started });
+      return null;
+    }
+    return game;
+  };
+
+  on("create-game", (payload, reply) => {
+    const roleConfig = sanitizeRoleConfig(payload.roleConfig);
+    if (typeof roleConfig === "string") {
+      reply({ success: false, error: roleConfig });
       return;
     }
-    
-    game.players.forEach(player => {
-      io.to(player.id).emit('game-started', { 
-        role: player.role,
-        isHost: false
+
+    const existing = findMembership(secret);
+    if (existing?.isHost) {
+      reply({ success: false, error: "Već vodiš sobu", redirect: existing.game.code });
+      return;
+    }
+    leaveCurrentGame(secret);
+
+    const game = createGame(secret, roleConfig);
+    broadcastState(game);
+    reply({ success: true, code: game.code });
+  });
+
+  on("join-game", (payload, reply) => {
+    const code = sanitizeCode(payload.code);
+    const name = sanitizeName(payload.name);
+    if (!code) {
+      reply({ success: false, error: "Neispravan kod sobe" });
+      return;
+    }
+    if (!name) {
+      reply({ success: false, error: "Unesi ime (do 20 znakova)" });
+      return;
+    }
+    const game = getGame(code);
+    if (!game) {
+      reply({ success: false, error: "Soba ne postoji" });
+      return;
+    }
+
+    const existing = findMembership(secret);
+    if (existing?.isHost) {
+      reply({
+        success: false,
+        error: "Ne možeš se pridružiti dok vodiš sobu",
+        redirect: existing.game.code,
       });
-    });
-    
-    io.to(game.hostId).emit('game-started', {
-      role: null,
-      isHost: true
-    });
-    
-    callback({ success: true });
-  });
-
-  socket.on('restart-game', (code: string, callback) => {
-    const game = restartGame(code, socket.id);
-    if (!game) {
-      callback({ success: false, error: 'Only the host can restart the game' });
       return;
     }
-    
-    io.to(code.toUpperCase()).emit('game-restarted', {
-      players: game.players.map(p => ({ id: p.id, name: p.name })),
-      roleConfig: game.roleConfig
-    });
-    
-    callback({ success: true });
-  });
+    if (existing && existing.game !== game) leaveCurrentGame(secret);
 
-  socket.on('get-all-roles', (code: string, callback) => {
-    const roles = getAllRoles(code, socket.id);
-    if (!roles) {
-      callback({ success: false, error: 'Not authorized or game not started' });
+    const error = joinGame(game, secret, name);
+    if (error) {
+      reply({ success: false, error });
       return;
     }
-    callback({ success: true, roles });
+
+    broadcastState(game);
+    reply({ success: true, code: game.code });
   });
 
-  socket.on('get-game-info', (code: string, callback) => {
-    const game = getGame(code);
-    if (!game) {
-      callback({ success: false, error: 'Game not found' });
-      return;
-    }
-    callback({
+  on("sync-game", (payload, reply) => {
+    const game = resolve(payload, reply, false);
+    if (!game) return;
+    const me = game.players.find((p) => p.secret === secret);
+    reply({ success: true, state: me ? playerView(game, me) : hostView(game) });
+  });
+
+  on("get-session", (_payload, reply) => {
+    const membership = findMembership(secret);
+    reply({
       success: true,
-      game: {
-        code: game.code,
-        players: game.players.map(p => ({ id: p.id, name: p.name })),
-        roleConfig: game.roleConfig,
-        started: game.started,
-        isHost: game.hostId === socket.id,
-        hostId: game.hostId
-      }
+      session: membership ? { code: membership.game.code, isHost: membership.isHost } : null,
     });
   });
 
-  socket.on('get-available-games', (callback) => {
-    const games = getAvailableGames();
-    callback({ success: true, games });
+  on("get-available-games", (_payload, reply) => {
+    reply({ success: true, games: getAvailableGames(secret) });
   });
 
-  socket.on('leave-game', ({ code }: { code: string }, callback) => {
-    const game = getGame(code);
-    if (!game) {
-      callback({ success: false, error: 'Game not found' });
+  on("update-roles", (payload, reply) => {
+    const game = resolve(payload, reply, true);
+    if (!game) return;
+    const roleConfig = sanitizeRoleConfig(payload.roleConfig);
+    if (typeof roleConfig === "string") {
+      reply({ success: false, error: roleConfig });
       return;
     }
-    
-    if (game.hostId === socket.id) {
-      callback({ success: false, error: 'Host cannot leave, use delete-game instead' });
+    const error = updateRoles(game, roleConfig);
+    if (error) {
+      reply({ success: false, error });
       return;
     }
-
-    const updatedGame = removePlayer(code, socket.id);
-    if (updatedGame) {
-      socket.leave(code.toUpperCase());
-      playerRooms.delete(socket.id);
-      io.to(code.toUpperCase()).emit('player-left', { 
-        players: updatedGame.players.map(p => ({ id: p.id, name: p.name })) 
-      });
-    }
-    
-    callback({ success: true });
+    broadcastState(game);
+    reply({ success: true });
   });
 
-  socket.on('delete-game', ({ code }: { code: string }, callback) => {
-    const game = getGame(code);
-    if (!game) {
-      callback({ success: false, error: 'Game not found' });
+  on("kick-player", (payload, reply) => {
+    const game = resolve(payload, reply, true);
+    if (!game) return;
+    const kicked = removePlayer(game, (p) => p.id === payload.playerId);
+    if (!kicked) {
+      reply({ success: false, error: "Igrač nije pronađen" });
       return;
     }
-    
-    if (game.hostId !== socket.id) {
-      callback({ success: false, error: 'Only host can delete the game' });
-      return;
-    }
-
-    io.to(code.toUpperCase()).emit('game-deleted', {});
-    
-    deleteGame(code);
-    socket.leave(code.toUpperCase());
-    playerRooms.delete(socket.id);
-    
-    callback({ success: true });
+    io.to(clientRoom(kicked.secret)).emit("kicked", {});
+    broadcastState(game);
+    reply({ success: true });
   });
 
-  socket.on('disconnect', () => {
-    console.log(`Player disconnected: ${socket.id}`);
-    const roomCode = playerRooms.get(socket.id);
-    if (roomCode) {
-      const game = getGame(roomCode);
-      if (game) {
-        const player = game.players.find(p => p.id === socket.id);
-        if (player) {
-          const timerKey = `${roomCode}-${player.name}`;
-          console.log(`Starting ${DISCONNECT_GRACE_PERIOD/1000}s removal timer for ${player.name}`);
-          
-          const timer = setTimeout(() => {
-            console.log(`Grace period expired, removing ${player.name}`);
-            const updatedGame = removePlayer(roomCode, socket.id);
-            if (updatedGame) {
-              io.to(roomCode).emit('player-left', { 
-                players: updatedGame.players.map(p => ({ id: p.id, name: p.name })) 
-              });
-            }
-            disconnectTimers.delete(timerKey);
-          }, DISCONNECT_GRACE_PERIOD);
-          
-          disconnectTimers.set(timerKey, timer);
-        }
-      }
-      playerRooms.delete(socket.id);
+  on("start-game", (payload, reply) => {
+    const game = resolve(payload, reply, true);
+    if (!game) return;
+    const error = startGame(game);
+    if (error) {
+      reply({ success: false, error });
+      return;
     }
+    broadcastState(game);
+    reply({ success: true });
+  });
+
+  on("restart-game", (payload, reply) => {
+    const game = resolve(payload, reply, true);
+    if (!game) return;
+    restartGame(game);
+    broadcastState(game);
+    reply({ success: true });
+  });
+
+  on("set-dead", (payload, reply) => {
+    const game = resolve(payload, reply, true);
+    if (!game) return;
+    const error = setDead(game, payload.playerId, payload.dead === true);
+    if (error) {
+      reply({ success: false, error });
+      return;
+    }
+    broadcastState(game);
+    reply({ success: true });
+  });
+
+  on("leave-game", (payload, reply) => {
+    const game = resolve(payload, reply, false);
+    if (!game) return;
+    if (game.hostSecret === secret) {
+      reply({ success: false, error: "Voditelj ne može napustiti sobu, može je samo zatvoriti" });
+      return;
+    }
+    removePlayer(game, (p) => p.secret === secret);
+    broadcastState(game);
+    reply({ success: true });
+  });
+
+  on("delete-game", (payload, reply) => {
+    const game = resolve(payload, reply, true);
+    if (!game) return;
+    notifyDeleted(game, secret);
+    deleteGame(game.code);
+    reply({ success: true });
+  });
+
+  socket.on("disconnect", () => {
+    console.log(`Client disconnected: ${socket.id}`);
+    const membership = findMembership(secret);
+    if (membership) broadcastState(membership.game);
   });
 });
 
-const PORT = 9999;
+const PORT = Number(process.env.PORT) || 9999;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  
-  const { startCleanupInterval } = require('./gameManager');
-  startCleanupInterval((code: string) => {
-    io.to(code.toUpperCase()).emit('game-deleted', {});
-    console.log(`Expired game ${code} deleted and players notified`);
+
+  startCleanupInterval((game) => {
+    notifyDeleted(game);
+    console.log(`Expired game ${game.code} deleted and players notified`);
   });
 });

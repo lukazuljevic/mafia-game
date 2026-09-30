@@ -1,106 +1,109 @@
 import { useState, useEffect } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useSocket } from '../socket';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useGame } from '../useGame';
+import { useWakeLock } from '../useWakeLock';
+import { ROLE_BY_KEY } from '../game';
+import BackButton from '../components/BackButton';
+import ConfirmModal, { type ConfirmOptions } from '../components/ConfirmModal';
 
-type Role = 'mafia' | 'doktor' | 'kurva' | 'policajac' | 'civil';
-
-interface RoleInfo {
-  icon: string;
-  name: string;
-  description: string;
-}
-
-const ROLE_INFO: Record<Role, RoleInfo> = {
-  mafia: {
-    icon: '🔫',
-    name: 'Mafia',
-    description: 'Ti si ubojica. Svake noći možeš eliminirati jednog igrača. Ostani skriven.'
-  },
-  doktor: {
-    icon: '💉',
-    name: 'Doktor',
-    description: 'Ti liječiš. Svake noći možeš spasiti jednog igrača od mafije.'
-  },
-  kurva: {
-    icon: '💋',
-    name: 'Kurva',
-    description: 'Ti zavodiš. Svake noći možeš spavati s jednim igračem.'
-  },
-  policajac: {
-    icon: '🔍',
-    name: 'Policajac',
-    description: 'Ti istražuješ. Svake noći možeš provjeriti je li netko mafia.'
-  },
-  civil: {
-    icon: '👤',
-    name: 'Civil',
-    description: 'Ti si običan građanin. Tvoj glas na glasanju je tvoja jedina moć.'
-  }
-};
+const AUTO_HIDE_MS = 5000;
 
 export default function RolePage() {
-  const { code } = useParams<{ code: string }>();
-  const location = useLocation();
+  const { code: rawCode = '' } = useParams<{ code: string }>();
+  const code = rawCode.toUpperCase();
   const navigate = useNavigate();
-  const { socket } = useSocket();
-  
-  const role = location.state?.role as Role;
+  const { state, send } = useGame(code);
+  useWakeLock();
+
   const [isRevealed, setIsRevealed] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
 
+  // The host narrates from the lobby, and everyone returns there when the game is stopped.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsRevealed(true);
-    }, 500);
+    if (state && (state.isHost || !state.started)) {
+      navigate(`/lobby/${state.code}`, { replace: true });
+    }
+  }, [state, navigate]);
 
+  // Flip the card back so it isn't left face-up on the table.
+  useEffect(() => {
+    if (!isRevealed) return;
+    const timer = setTimeout(() => setIsRevealed(false), AUTO_HIDE_MS);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isRevealed]);
 
-  useEffect(() => {
-    if (!socket || !code) return;
+  const role = state?.you?.role ? ROLE_BY_KEY[state.you.role] : null;
 
-    const handleGameRestarted = () => {
-      navigate(`/lobby/${code}`);
-    };
-
-    socket.on('game-restarted', handleGameRestarted);
-
-    return () => {
-      socket.off('game-restarted', handleGameRestarted);
-    };
-  }, [socket, code, navigate]);
-
-  if (!role || !ROLE_INFO[role]) {
+  if (!state || !role) {
     return (
       <div className="page page-center">
-        <div className="card">
-          <h2>Greška</h2>
-          <p>Uloga nije pronađena</p>
-          <button className="btn btn-primary" onClick={() => navigate('/')}>
-            Povratak
-          </button>
-        </div>
+        <BackButton onClick={() => navigate('/')} />
+        <p className="waiting-status"><span>Učitavanje uloge…</span></p>
       </div>
     );
   }
 
-  const info = ROLE_INFO[role];
+  const toggleReveal = () => {
+    if (!isRevealed) navigator.vibrate?.(40);
+    setIsRevealed(v => !v);
+  };
+
+  const handleLeave = () => {
+    setConfirm({
+      title: 'Napustiti igru?',
+      message: 'Igra je u tijeku. Nakon izlaska nećeš se moći vratiti u ovu rundu.',
+      confirmLabel: 'Napusti',
+      danger: true,
+      onConfirm: async () => {
+        const res = await send('leave-game');
+        if (res.success) navigate('/', { replace: true });
+      },
+    });
+  };
 
   return (
     <div className="page role-page">
+      <BackButton onClick={handleLeave} label="Napusti igru" />
+
       <div className="role-reveal-container">
-        <p className="role-reveal-intro">Tvoja tajna uloga</p>
-        
-        <div className={`card role-card role-${role} ${isRevealed ? 'role-revealed' : 'role-hidden'}`}>
-          <div className="role-icon-large">{info.icon}</div>
-          <h1 className="role-title">{info.name}</h1>
-          <p className="role-description">{info.description}</p>
-        </div>
+        {state.winner ? (
+          <div className={`winner-banner winner-${state.winner}`} role="status">
+            {state.winner === 'town' ? '🏆 Građani su pobijedili!' : '🔫 Mafija je pobijedila!'}
+          </div>
+        ) : state.you?.dead ? (
+          <div className="dead-banner" role="status">☠️ Van igre si — ne otkrivaj svoju ulogu</div>
+        ) : null}
+
+        <p className="role-reveal-intro">{state.you?.name}, tvoja tajna uloga</p>
+
+        <button
+          type="button"
+          className={`flip-card ${isRevealed ? 'is-revealed' : ''}`}
+          onClick={toggleReveal}
+          aria-label={isRevealed ? 'Sakrij ulogu' : 'Prikaži ulogu'}
+        >
+          <div className="flip-card-inner">
+            <div className="card role-card flip-card-face flip-card-front" aria-hidden={isRevealed}>
+              <div className="role-icon-large">🃏</div>
+              <h2 className="role-title">Skriveno</h2>
+              <p className="role-description">Dodirni za otkrivanje</p>
+            </div>
+            <div className={`card role-card flip-card-face flip-card-back role-${role.key}`} aria-hidden={!isRevealed}>
+              <div className="role-icon-large">{role.icon}</div>
+              <h1 className="role-title">{role.name}</h1>
+              <p className="role-description">{role.description}</p>
+              <p className="role-hide-hint">Dodirni za skrivanje</p>
+            </div>
+          </div>
+        </button>
 
         <div className="role-warning">
           <span>🤫</span>
           <span>Ne pokazuj svoj ekran drugim igračima!</span>
         </div>
       </div>
+
+      <ConfirmModal options={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }

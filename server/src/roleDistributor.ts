@@ -1,19 +1,21 @@
-import { Role, RoleConfig, Player } from './types';
+import { Role, RoleConfig, Player, ROLE_KEYS } from './types';
+
+export function countSlots(roleConfig: RoleConfig): number {
+  return ROLE_KEYS.reduce((sum, role) => sum + roleConfig[role], 0);
+}
 
 export function distributeRoles(players: Player[], roleConfig: RoleConfig): Player[] {
   const roles: Role[] = [];
-  
-  for (let i = 0; i < roleConfig.mafia; i++) roles.push('mafia');
-  for (let i = 0; i < roleConfig.doktor; i++) roles.push('doktor');
-  for (let i = 0; i < roleConfig.kurva; i++) roles.push('kurva');
-  for (let i = 0; i < roleConfig.policajac; i++) roles.push('policajac');
-  for (let i = 0; i < roleConfig.civil; i++) roles.push('civil');
-  
+  for (const role of ROLE_KEYS) {
+    for (let i = 0; i < roleConfig[role]; i++) roles.push(role);
+  }
+
   shuffleArray(roles);
-  
+
   return players.map((player, index) => ({
     ...player,
-    role: roles[index]
+    role: roles[index],
+    dead: false,
   }));
 }
 
@@ -22,9 +24,4 @@ function shuffleArray<T>(array: T[]): void {
     const j = Math.floor(Math.random() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
-}
-
-export function validateRoleConfig(playerCount: number, roleConfig: RoleConfig): boolean {
-  const totalRoles = roleConfig.mafia + roleConfig.doktor + roleConfig.kurva + roleConfig.policajac + roleConfig.civil;
-  return totalRoles === playerCount;
 }

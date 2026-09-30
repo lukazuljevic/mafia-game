@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSocket } from '../socket';
+import { emitAck, getSavedName, saveName, type Ack } from '../game';
+import ConfirmModal, { type ConfirmOptions } from '../components/ConfirmModal';
 
 interface AvailableGame {
   code: string;
@@ -8,72 +10,136 @@ interface AvailableGame {
   totalSlots: number;
 }
 
+interface Session {
+  code: string;
+  isHost: boolean;
+}
+
 export default function HomePage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { code: linkCode } = useParams<{ code: string }>();
   const { socket, isConnected } = useSocket();
-  const [showJoinModal, setShowJoinModal] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
-  const [playerName, setPlayerName] = useState('');
+  const [showJoinModal, setShowJoinModal] = useState(Boolean(linkCode));
+  const [joinCode, setJoinCode] = useState(linkCode?.toUpperCase() ?? '');
+  const [playerName, setPlayerName] = useState(getSavedName);
   const [error, setError] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [availableGames, setAvailableGames] = useState<AvailableGame[]>([]);
+  const [session, setSession] = useState<Session | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
+  const notice: string | undefined = location.state?.notice;
+
+  const refresh = useCallback(() => {
+    emitAck<Ack & { games?: AvailableGame[] }>(socket, 'get-available-games').then(res => {
+      if (res.success && res.games) setAvailableGames(res.games);
+    });
+    emitAck<Ack & { session?: Session | null }>(socket, 'get-session').then(res => {
+      if (res.success) setSession(res.session ?? null);
+    });
+  }, [socket]);
 
   useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    const fetchGames = () => {
-      socket.emit('get-available-games', (response: { success: boolean; games: AvailableGame[] }) => {
-        if (response.success) {
-          setAvailableGames(response.games);
-        }
-      });
-    };
-
-    fetchGames();
-    const interval = setInterval(fetchGames, 5000);
-
+    if (!isConnected) return;
+    refresh();
+    const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
-  }, [socket, isConnected]);
+  }, [isConnected, refresh]);
 
-  const handleJoin = () => {
-    if (!socket || !joinCode.trim() || !playerName.trim()) return;
-    
+  const closeJoinModal = () => {
+    setShowJoinModal(false);
+    setError('');
+    if (linkCode) navigate('/', { replace: true });
+  };
+
+  const handleJoin = async (e: FormEvent) => {
+    e.preventDefault();
+    const name = playerName.trim();
+    const code = joinCode.trim().toUpperCase();
+    if (!name || code.length !== 6) return;
+
     setIsJoining(true);
     setError('');
-    
-    socket.emit('join-game', { code: joinCode.toUpperCase(), name: playerName }, 
-      (response: { success: boolean; error?: string; game?: { code: string } }) => {
-        if (response.success && response.game) {
-          navigate(`/lobby/${response.game.code}`, { state: { playerName } });
-        } else {
-          setError(response.error || 'Greška pri spajanju');
-        }
-        setIsJoining(false);
-      }
-    );
+    const res = await emitAck<Ack & { code?: string }>(socket, 'join-game', { code, name });
+    setIsJoining(false);
+
+    if (res.success && res.code) {
+      saveName(name);
+      navigate(`/lobby/${res.code}`, { replace: Boolean(linkCode) });
+    } else {
+      setError(res.error || 'Greška pri spajanju');
+    }
   };
 
   const handleQuickJoin = (code: string) => {
     setJoinCode(code);
+    setError('');
     setShowJoinModal(true);
   };
 
+  const handleLeaveSession = () => {
+    if (!session) return;
+    setConfirm({
+      title: session.isHost ? 'Zatvoriti sobu?' : 'Napustiti sobu?',
+      message: session.isHost ? 'Svi igrači bit će izbačeni iz sobe.' : undefined,
+      confirmLabel: session.isHost ? 'Zatvori' : 'Napusti',
+      danger: true,
+      onConfirm: async () => {
+        await emitAck(socket, session.isHost ? 'delete-game' : 'leave-game', { code: session.code });
+        refresh();
+      },
+    });
+  };
+
+  const dismissNotice = () => navigate(location.pathname, { replace: true });
+
   return (
     <div className="page page-center home-page">
+      {notice && (
+        <div className="notice" role="status">
+          <span>{notice}</span>
+          <button type="button" className="notice-close" onClick={dismissNotice} aria-label="Zatvori">
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="animate-in">
         <h1 className="logo animate-float">MAFIA</h1>
         <p className="tagline">Tko je ubojica među nama?</p>
       </div>
 
+      {session && (
+        <div className="reconnect-banner animate-in">
+          <p>
+            {session.isHost ? 'Vodiš sobu' : 'Nalaziš se u sobi'} <strong>{session.code}</strong>
+          </p>
+          <div className="reconnect-buttons">
+            <button
+              type="button"
+              className="btn btn-primary btn-small"
+              onClick={() => navigate(`/lobby/${session.code}`)}
+            >
+              Vrati se
+            </button>
+            <button type="button" className="btn btn-secondary btn-small" onClick={handleLeaveSession}>
+              {session.isHost ? 'Zatvori sobu' : 'Napusti'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="home-buttons animate-in" style={{ animationDelay: '0.2s' }}>
-        <button 
+        <button
+          type="button"
           className="btn btn-primary"
           onClick={() => navigate('/create')}
           disabled={!isConnected}
         >
           Nova Igra
         </button>
-        <button 
+        <button
+          type="button"
           className="btn btn-secondary"
           onClick={() => setShowJoinModal(true)}
           disabled={!isConnected}
@@ -82,18 +148,13 @@ export default function HomePage() {
         </button>
       </div>
 
-      {!isConnected && (
-        <p style={{ marginTop: '20px', color: 'var(--color-text-muted)' }}>
-          Spajanje na server...
-        </p>
-      )}
-
       {isConnected && availableGames.length > 0 && (
         <div className="available-games animate-in" style={{ animationDelay: '0.4s' }}>
           <h3>Aktivne sobe</h3>
           <div className="games-list">
             {availableGames.map(game => (
               <button
+                type="button"
                 key={game.code}
                 className="game-item"
                 onClick={() => handleQuickJoin(game.code)}
@@ -107,54 +168,65 @@ export default function HomePage() {
       )}
 
       {showJoinModal && (
-        <div className="modal-overlay" onClick={() => setShowJoinModal(false)}>
-          <div className="card modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={closeJoinModal}>
+          <form className="card modal" onClick={e => e.stopPropagation()} onSubmit={handleJoin}>
             <h2>Pridruži se igri</h2>
-            
+
             <div className="input-group" style={{ marginBottom: '16px' }}>
-              <label>Tvoje ime</label>
+              <label htmlFor="player-name">Tvoje ime</label>
               <input
+                id="player-name"
                 type="text"
                 className="input"
                 placeholder="Unesi ime..."
                 value={playerName}
                 onChange={e => setPlayerName(e.target.value)}
                 maxLength={20}
+                autoComplete="nickname"
+                autoCapitalize="words"
+                enterKeyHint="next"
+                autoFocus={!playerName}
               />
             </div>
 
             <div className="input-group">
-              <label>Kod sobe</label>
+              <label htmlFor="room-code">Kod sobe</label>
               <input
+                id="room-code"
                 type="text"
-                className="input"
+                className="input input-code"
                 placeholder="ABC123"
                 value={joinCode}
-                onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                 maxLength={6}
-                style={{ textTransform: 'uppercase', letterSpacing: '0.2em', textAlign: 'center' }}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                enterKeyHint="go"
+                autoFocus={Boolean(playerName) && !joinCode}
               />
             </div>
 
-            {error && (
-              <p style={{ color: '#ff4444', marginTop: '12px', fontSize: '14px' }}>{error}</p>
-            )}
+            {error && <p className="form-error" role="alert">{error}</p>}
 
             <div className="modal-buttons">
-              <button className="btn btn-secondary" onClick={() => setShowJoinModal(false)}>
+              <button type="button" className="btn btn-secondary" onClick={closeJoinModal}>
                 Odustani
               </button>
-              <button 
-                className="btn btn-primary" 
-                onClick={handleJoin}
-                disabled={!joinCode.trim() || !playerName.trim() || isJoining}
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={joinCode.trim().length !== 6 || !playerName.trim() || isJoining}
               >
-                {isJoining ? 'Spajam...' : 'Pridruži se'}
+                {isJoining ? 'Spajam...' : 'Uđi'}
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
+
+      <ConfirmModal options={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }

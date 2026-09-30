@@ -1,13 +1,15 @@
-import { Game, Player, RoleConfig } from './types';
-import { distributeRoles } from './roleDistributor';
+import { randomBytes } from 'crypto';
+import { Game, Player, RoleConfig, Winner } from './types';
+import { countSlots, distributeRoles } from './roleDistributor';
 
 const games: Map<string, Game> = new Map();
 
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
 function generateCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length));
   }
   return code;
 }
@@ -20,16 +22,19 @@ function generateUniqueCode(): string {
   return code;
 }
 
-export function createGame(hostId: string, roleConfig: RoleConfig): Game {
+function touch(game: Game): void {
+  game.lastActivity = Date.now();
+}
+
+export function createGame(hostSecret: string, roleConfig: RoleConfig): Game {
   const code = generateUniqueCode();
   const game: Game = {
-    id: code,
     code,
-    hostId,
+    hostSecret,
     players: [],
     roleConfig,
     started: false,
-    createdAt: new Date()
+    lastActivity: Date.now(),
   };
   games.set(code, game);
   return game;
@@ -39,148 +44,126 @@ export function getGame(code: string): Game | undefined {
   return games.get(code.toUpperCase());
 }
 
-export function joinGame(code: string, player: Player): Game | null {
-  const game = games.get(code.toUpperCase());
-  if (!game || game.started) return null;
-  
-  const totalSlots = game.roleConfig.mafia + game.roleConfig.doktor + 
-    game.roleConfig.kurva + game.roleConfig.policajac + game.roleConfig.civil;
-  
-  if (game.players.length >= totalSlots) return null;
-  if (game.players.some(p => p.id === player.id)) return game;
-  
-  game.players.push(player);
-  return game;
-}
-
-export function removePlayer(code: string, playerId: string): Game | null {
-  const game = games.get(code.toUpperCase());
-  if (!game) return null;
-  
-  game.players = game.players.filter(p => p.id !== playerId);
-  return game;
-}
-
-export function startGame(code: string, hostId: string): Game | null {
-  const game = games.get(code.toUpperCase());
-  if (!game || game.hostId !== hostId || game.started) return null;
-  
-  const totalRoles = game.roleConfig.mafia + game.roleConfig.doktor + 
-    game.roleConfig.kurva + game.roleConfig.policajac + game.roleConfig.civil;
-  
-  if (game.players.length !== totalRoles) return null;
-  
-  game.players = distributeRoles(game.players, game.roleConfig);
-  game.started = true;
-  return game;
-}
-
-export function restartGame(code: string, hostId: string): Game | null {
-  const game = games.get(code.toUpperCase());
-  if (!game || game.hostId !== hostId) return null;
-  
-  game.players = game.players.map(p => ({ id: p.id, name: p.name }));
-  game.started = false;
-  return game;
-}
-
-export function getAllRoles(code: string, hostId: string): { name: string; role: string }[] | null {
-  const game = games.get(code.toUpperCase());
-  if (!game || game.hostId !== hostId || !game.started) return null;
-  
-  return game.players.map(p => ({ name: p.name, role: p.role || 'unknown' }));
-}
-
-export function updatePlayerId(code: string, playerName: string, newPlayerId: string): { game: Game; role: string | null; isHost: boolean } | null {
-  const game = games.get(code.toUpperCase());
-  if (!game) return null;
-  
-  const player = game.players.find(p => p.name === playerName);
-  if (!player) return null;
-  
-  player.id = newPlayerId;
-  const isHost = game.hostId === newPlayerId;
-  
-  return { game, role: player.role || null, isHost };
-}
-
-export function updateHostId(code: string, newHostId: string): Game | null {
-  const game = games.get(code.toUpperCase());
-  if (!game) return null;
-  
-  game.hostId = newHostId;
-  return game;
-}
-
-export function getAvailableGames(): { code: string; playerCount: number; totalSlots: number }[] {
-  const available: { code: string; playerCount: number; totalSlots: number }[] = [];
-  
-  games.forEach(game => {
-    if (!game.started) {
-      const totalSlots = game.roleConfig.mafia + game.roleConfig.doktor + 
-        game.roleConfig.kurva + game.roleConfig.policajac + game.roleConfig.civil;
-      
-      if (game.players.length < totalSlots) {
-        available.push({
-          code: game.code,
-          playerCount: game.players.length,
-          totalSlots
-        });
-      }
-    }
-  });
-  
-  return available;
-}
-
-export function isHostOfAnyGame(hostId: string): boolean {
+export function findMembership(secret: string): { game: Game; isHost: boolean } | null {
   for (const game of games.values()) {
-    if (game.hostId === hostId) {
-      return true;
-    }
-  }
-  return false;
-}
-
-export function getGameByHostId(hostId: string): Game | null {
-  for (const game of games.values()) {
-    if (game.hostId === hostId) {
-      return game;
-    }
+    if (game.hostSecret === secret) return { game, isHost: true };
+    if (game.players.some(p => p.secret === secret)) return { game, isHost: false };
   }
   return null;
+}
+
+export function joinGame(game: Game, secret: string, name: string): string | null {
+  if (game.players.some(p => p.secret === secret)) return null;
+  if (game.started) return 'Igra je već počela';
+  if (game.players.length >= countSlots(game.roleConfig)) return 'Soba je puna';
+  if (game.players.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+    return 'To ime je već zauzeto u ovoj sobi';
+  }
+
+  const player: Player = { id: randomBytes(6).toString('hex'), secret, name, dead: false };
+  game.players.push(player);
+  touch(game);
+  return null;
+}
+
+export function removePlayer(game: Game, predicate: (p: Player) => boolean): Player | null {
+  const player = game.players.find(predicate);
+  if (!player) return null;
+  game.players = game.players.filter(p => p !== player);
+  touch(game);
+  return player;
+}
+
+export function updateRoles(game: Game, roleConfig: RoleConfig): string | null {
+  if (game.started) return 'Uloge se ne mogu mijenjati tijekom igre';
+  game.roleConfig = roleConfig;
+  touch(game);
+  return null;
+}
+
+export function startGame(game: Game): string | null {
+  if (game.started) return 'Igra je već počela';
+  const totalRoles = countSlots(game.roleConfig);
+  if (game.players.length !== totalRoles) {
+    return `Broj igrača (${game.players.length}) ne odgovara broju uloga (${totalRoles})`;
+  }
+
+  game.players = distributeRoles(game.players, game.roleConfig);
+  game.started = true;
+  touch(game);
+  return null;
+}
+
+export function restartGame(game: Game): void {
+  game.players = game.players.map(({ id, secret, name }) => ({ id, secret, name, dead: false }));
+  game.started = false;
+  touch(game);
+}
+
+export function setDead(game: Game, playerId: string, dead: boolean): string | null {
+  if (!game.started) return 'Igra nije počela';
+  const player = game.players.find(p => p.id === playerId);
+  if (!player) return 'Igrač nije pronađen';
+  player.dead = dead;
+  touch(game);
+  return null;
+}
+
+export function getWinner(game: Game): Winner {
+  if (!game.started) return null;
+  const alive = game.players.filter(p => !p.dead);
+  const mafia = alive.filter(p => p.role === 'mafia').length;
+  const town = alive.length - mafia;
+  if (mafia === 0) return 'town';
+  if (mafia >= town) return 'mafia';
+  return null;
+}
+
+export function getAvailableGames(excludeSecret: string): { code: string; playerCount: number; totalSlots: number }[] {
+  const available: { code: string; playerCount: number; totalSlots: number }[] = [];
+
+  games.forEach(game => {
+    if (game.started || game.hostSecret === excludeSecret) return;
+    if (game.players.some(p => p.secret === excludeSecret)) return;
+
+    const totalSlots = countSlots(game.roleConfig);
+    if (game.players.length < totalSlots) {
+      available.push({ code: game.code, playerCount: game.players.length, totalSlots });
+    }
+  });
+
+  return available;
 }
 
 export function deleteGame(code: string): boolean {
   return games.delete(code.toUpperCase());
 }
 
-const GAME_EXPIRY_MS = 12 * 60 * 60 * 1000; // 12 hours
+const GAME_EXPIRY_MS = 12 * 60 * 60 * 1000; // 12 hours of inactivity
 
-export function cleanupExpiredGames(): string[] {
+export function cleanupExpiredGames(): Game[] {
   const now = Date.now();
-  const expired: string[] = [];
-  
-  games.forEach((game, code) => {
-    const gameAge = now - game.createdAt.getTime();
-    if (gameAge > GAME_EXPIRY_MS) {
-      expired.push(code);
+  const expired: Game[] = [];
+
+  games.forEach(game => {
+    if (now - game.lastActivity > GAME_EXPIRY_MS) {
+      expired.push(game);
     }
   });
-  
-  expired.forEach(code => {
-    console.log(`Cleaning up expired game: ${code}`);
-    games.delete(code);
+
+  expired.forEach(game => {
+    console.log(`Cleaning up expired game: ${game.code}`);
+    games.delete(game.code);
   });
-  
+
   return expired;
 }
 
-export function startCleanupInterval(onGameExpired?: (code: string) => void): NodeJS.Timeout {
+export function startCleanupInterval(onGameExpired?: (game: Game) => void): NodeJS.Timeout {
   return setInterval(() => {
     const expired = cleanupExpiredGames();
     if (onGameExpired) {
-      expired.forEach(code => onGameExpired(code));
+      expired.forEach(game => onGameExpired(game));
     }
   }, 60 * 60 * 1000); // Check every hour
 }

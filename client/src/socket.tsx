@@ -1,37 +1,34 @@
 import { io, Socket } from 'socket.io-client';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-
-const SOCKET_URL = window.location.origin;
-//const SOCKET_URL = 'http://localhost:9999';
+import { getClientId } from './game';
 
 interface SocketContextType {
-  socket: Socket | null;
+  socket: Socket;
   isConnected: boolean;
 }
 
-const SocketContext = createContext<SocketContextType>({ socket: null, isConnected: false });
+const SocketContext = createContext<SocketContextType | null>(null);
 
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [socket] = useState(() =>
+    io(window.location.origin, { auth: { clientId: getClientId() }, autoConnect: false })
+  );
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const newSocket = io(SOCKET_URL);
-    
-    newSocket.on('connect', () => {
-      setIsConnected(true);
-    });
+    const onConnect = () => setIsConnected(true);
+    const onDisconnect = () => setIsConnected(false);
 
-    newSocket.on('disconnect', () => {
-      setIsConnected(false);
-    });
-
-    setSocket(newSocket);
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.connect();
 
     return () => {
-      newSocket.close();
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.disconnect();
     };
-  }, []);
+  }, [socket]);
 
   return (
     <SocketContext.Provider value={{ socket, isConnected }}>
@@ -40,6 +37,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useSocket() {
-  return useContext(SocketContext);
+  const context = useContext(SocketContext);
+  if (!context) throw new Error('useSocket must be used inside SocketProvider');
+  return context;
 }

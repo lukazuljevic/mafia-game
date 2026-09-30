@@ -1,25 +1,24 @@
 export type Role = 'mafia' | 'doktor' | 'kurva' | 'policajac' | 'civil';
 
-export interface RoleConfig {
-  mafia: number;
-  doktor: number;
-  kurva: number;
-  policajac: number;
-  civil: number;
-}
+export const ROLE_KEYS: Role[] = ['mafia', 'doktor', 'kurva', 'policajac', 'civil'];
+
+export type RoleConfig = Record<Role, number>;
 
 export interface Player {
-  id: string;
+  id: string;       // public id, safe to broadcast
+  secret: string;   // client id of the owning device, never broadcast
   name: string;
   role?: Role;
+  dead: boolean;
 }
 
 export interface Game {
-  id: string;
   code: string;
-  hostId: string;
+  hostSecret: string;
   players: Player[];
   roleConfig: RoleConfig;
   started: boolean;
-  createdAt: Date;
+  lastActivity: number;
 }
+
+export type Winner = 'mafia' | 'town' | null;

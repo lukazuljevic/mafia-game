@@ -1,362 +1,298 @@
 import { useState, useEffect } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { useSocket } from '../socket';
-import leftArrowSvg from '../assets/left-arrow.svg';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useGame } from '../useGame';
+import { useWakeLock } from '../useWakeLock';
+import { ROLES, countSlots, roleConfigError, type PlayerState, type RoleConfig } from '../game';
+import BackButton from '../components/BackButton';
+import ConfirmModal, { type ConfirmOptions } from '../components/ConfirmModal';
+import RoleCounter from '../components/RoleCounter';
+import NarratorPanel from '../components/NarratorPanel';
 
-interface Player {
-  id: string;
-  name: string;
-  role?: string;
-}
-
-interface RoleConfig {
-  mafia: number;
-  doktor: number;
-  kurva: number;
-  policajac: number;
-  civil: number;
-}
-
-const ROLE_ICONS: Record<string, string> = {
-  mafia: '🔫',
-  doktor: '💉',
-  kurva: '💋',
-  policajac: '🔍',
-  civil: '👤'
-};
-
-function savePlayerSession(code: string, playerName: string) {
-  localStorage.setItem('mafia-session', JSON.stringify({ code, playerName, isHost: false }));
-}
-
-function saveHostSession(code: string) {
-  localStorage.setItem('mafia-session', JSON.stringify({ code, isHost: true }));
-}
-
-function getSession(): { code: string; playerName?: string; isHost: boolean } | null {
+async function copyText(text: string) {
   try {
-    const saved = localStorage.getItem('mafia-session');
-    if (!saved) return null;
-    return JSON.parse(saved);
+    await navigator.clipboard.writeText(text);
   } catch {
-    return null;
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
   }
 }
 
-function clearSession() {
-  localStorage.removeItem('mafia-session');
+function sameConfig(a: RoleConfig, b: RoleConfig) {
+  return ROLES.every(r => a[r.key] === b[r.key]);
 }
 
 export default function LobbyPage() {
-  const { code } = useParams<{ code: string }>();
-  const location = useLocation();
+  const { code: rawCode = '' } = useParams<{ code: string }>();
+  const code = rawCode.toUpperCase();
   const navigate = useNavigate();
-  const { socket, isConnected } = useSocket();
-  
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [isHost, setIsHost] = useState(location.state?.isHost || false);
-  const [hostId, setHostId] = useState<string | null>(null);
-  const [roleConfig, setRoleConfig] = useState<RoleConfig | null>(location.state?.roleConfig || null);
+  const { state, send } = useGame(code);
+  useWakeLock();
+
+  const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
+  const [error, setError] = useState('');
   const [isStarting, setIsStarting] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [gameStarted, setGameStarted] = useState(false);
-  const [myName, setMyName] = useState<string | null>(location.state?.playerName || null);
-  const [reconnected, setReconnected] = useState(false);
+  const [copied, setCopied] = useState<'code' | 'link' | null>(null);
+  const [draft, setDraft] = useState<RoleConfig | null>(null);
+  const [showRoles, setShowRoles] = useState(false);
 
-  const totalSlots = roleConfig 
-    ? roleConfig.mafia + roleConfig.doktor + roleConfig.kurva + roleConfig.policajac + roleConfig.civil
-    : 0;
+  // Players go to their role card as soon as the game starts.
+  useEffect(() => {
+    if (state && !state.isHost && state.started) {
+      navigate(`/role/${state.code}`, { replace: true });
+    }
+  }, [state, navigate]);
 
   useEffect(() => {
-    if (!code) return;
-    
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const run = async (event: string, extra?: object) => {
+    setError('');
+    const res = await send(event, extra);
+    if (!res.success) setError(res.error || 'Greška');
+    return res;
+  };
+
+  if (!state) {
+    return (
+      <div className="page page-center">
+        <BackButton onClick={() => navigate('/')} />
+        <p className="waiting-status"><span>Učitavanje sobe…</span></p>
+      </div>
+    );
+  }
+
+  const { isHost, started, players } = state;
+  const config = draft && !sameConfig(draft, state.roleConfig) ? draft : state.roleConfig;
+  const configError = roleConfigError(config);
+  const totalSlots = countSlots(config);
+  const missing = totalSlots - players.length;
+  const offlineCount = players.filter(p => !p.connected).length;
+  const canStart = !configError && missing === 0 && sameConfig(config, state.roleConfig);
+
+  const handleBack = () => {
     if (isHost) {
-      saveHostSession(code);
-    } else if (myName) {
-      savePlayerSession(code, myName);
+      setConfirm({
+        title: 'Zatvoriti sobu?',
+        message: 'Svi igrači bit će izbačeni iz sobe.',
+        confirmLabel: 'Zatvori',
+        danger: true,
+        onConfirm: async () => {
+          const res = await run('delete-game');
+          if (res.success) navigate('/', { replace: true });
+        },
+      });
+      return;
     }
-  }, [code, myName, isHost]);
+    run('leave-game').then(res => {
+      if (res.success) navigate('/', { replace: true });
+    });
+  };
 
-  useEffect(() => {
-    if (!socket || !code || !isConnected || reconnected) return;
-
-    const session = getSession();
-    
-    if (session && session.code === code) {
-      if (session.isHost) {
-        socket.emit('reconnect-host', { code }, (response: {
-          success: boolean;
-          game?: {
-            players: Player[];
-            roleConfig: RoleConfig;
-            started: boolean;
-            isHost: boolean;
-            hostId: string;
-          };
-        }) => {
-          if (response.success && response.game) {
-            setPlayers(response.game.players);
-            setRoleConfig(response.game.roleConfig);
-            setIsHost(true);
-            setHostId(response.game.hostId);
-            setGameStarted(response.game.started);
-            setReconnected(true);
-            
-            if (response.game.started) {
-              socket.emit('get-all-roles', code, (rolesResponse: { success: boolean; roles?: { name: string; role: string }[] }) => {
-                if (rolesResponse.success && rolesResponse.roles) {
-                  setPlayers(prev => prev.map(p => {
-                    const roleInfo = rolesResponse.roles?.find(r => r.name === p.name);
-                    return roleInfo ? { ...p, role: roleInfo.role } : p;
-                  }));
-                }
-              });
-            }
-            return;
-          }
-          setReconnected(true);
-        });
-        return;
-      } else if (session.playerName) {
-        socket.emit('reconnect-player', { code, playerName: session.playerName }, (response: {
-          success: boolean;
-          game?: {
-            players: Player[];
-            roleConfig: RoleConfig;
-            started: boolean;
-            isHost: boolean;
-            hostId: string;
-          };
-          role?: string;
-        }) => {
-          if (response.success && response.game) {
-            setPlayers(response.game.players);
-            setRoleConfig(response.game.roleConfig);
-            setIsHost(response.game.isHost);
-            setHostId(response.game.hostId);
-            setGameStarted(response.game.started);
-            setMyName(session.playerName!);
-            setReconnected(true);
-            
-            if (response.game.started && response.role) {
-              navigate(`/role/${code}`, { state: { role: response.role, isHost: false } });
-            }
-            return;
-          }
-          setReconnected(true);
-        });
-        return;
+  const handleShare = async () => {
+    const url = `${window.location.origin}/join/${code}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Mafia', text: `Pridruži se igri Mafia! Kod sobe: ${code}`, url });
+      } catch {
+        // Share sheet dismissed.
       }
+      return;
     }
-
-    socket.emit('get-game-info', code, (response: { 
-      success: boolean; 
-      game?: { 
-        players: Player[]; 
-        roleConfig: RoleConfig;
-        isHost: boolean;
-        started: boolean;
-        hostId: string;
-      } 
-    }) => {
-      if (response.success && response.game) {
-        setPlayers(response.game.players);
-        setRoleConfig(response.game.roleConfig);
-        setIsHost(response.game.isHost);
-        setHostId(response.game.hostId);
-        setGameStarted(response.game.started);
-        
-        const me = response.game.players.find(p => p.id === socket.id);
-        if (me) setMyName(me.name);
-      }
-      setReconnected(true);
-    });
-  }, [socket, code, navigate, isConnected, reconnected]);
-
-  useEffect(() => {
-    if (!socket || !code) return;
-
-    socket.on('player-joined', ({ players: newPlayers, hostId: newHostId }: { players: Player[]; hostId: string }) => {
-      setPlayers(newPlayers);
-      if (newHostId) setHostId(newHostId);
-    });
-
-    socket.on('player-left', ({ players: newPlayers }: { players: Player[] }) => {
-      setPlayers(newPlayers);
-    });
-
-    socket.on('game-started', ({ role, isHost: playerIsHost }: { role: string | null; isHost: boolean }) => {
-      if (playerIsHost) {
-        socket.emit('get-all-roles', code, (response: { success: boolean; roles?: { name: string; role: string }[] }) => {
-          if (response.success && response.roles) {
-            setPlayers(prev => prev.map(p => {
-              const roleInfo = response.roles?.find(r => r.name === p.name);
-              return roleInfo ? { ...p, role: roleInfo.role } : p;
-            }));
-            setGameStarted(true);
-          }
-        });
-      } else {
-        navigate(`/role/${code}`, { state: { role, isHost: false } });
-      }
-    });
-
-    socket.on('game-restarted', ({ players: newPlayers, roleConfig: newRoleConfig }: { players: Player[]; roleConfig: RoleConfig }) => {
-      setPlayers(newPlayers.map(p => ({ id: p.id, name: p.name })));
-      setRoleConfig(newRoleConfig);
-      setGameStarted(false);
-    });
-
-    socket.on('game-deleted', () => {
-      clearSession();
-      navigate('/');
-    });
-
-    return () => {
-      socket.off('player-joined');
-      socket.off('player-left');
-      socket.off('game-started');
-      socket.off('game-restarted');
-      socket.off('game-deleted');
-    };
-  }, [socket, code, navigate]);
-
-  const handleStartGame = () => {
-    if (!socket || !code) return;
-    
-    setIsStarting(true);
-    socket.emit('start-game', code, (response: { success: boolean; error?: string }) => {
-      if (!response.success) {
-        console.error(response.error);
-      }
-      setIsStarting(false);
-    });
-  };
-
-  const handleStopGame = () => {
-    if (!socket || !code) return;
-    
-    socket.emit('restart-game', code, (response: { success: boolean; error?: string }) => {
-      if (!response.success) {
-        console.error(response.error);
-      }
-    });
-  };
-
-  const handleLeaveGame = () => {
-    if (!socket || !code) return;
-    
-    socket.emit('leave-game', { code }, (response: { success: boolean; error?: string }) => {
-      if (response.success) {
-        clearSession();
-        navigate('/');
-      } else {
-        console.error(response.error);
-      }
-    });
-  };
-
-  const handleDeleteGame = () => {
-    if (!socket || !code) return;
-    
-    socket.emit('delete-game', { code }, (response: { success: boolean; error?: string }) => {
-      if (response.success) {
-        clearSession();
-        navigate('/');
-      } else {
-        console.error(response.error);
-      }
-    });
+    await copyText(url);
+    setCopied('link');
   };
 
   const handleCopyCode = async () => {
-    if (!code) return;
-    
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      const textArea = document.createElement('textarea');
-      textArea.value = code;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    await copyText(code);
+    setCopied('code');
   };
 
-  const canStart = players.length === totalSlots && isHost && !gameStarted;
+  const changeRoles = (next: RoleConfig) => {
+    setDraft(next);
+    if (!roleConfigError(next)) run('update-roles', { roleConfig: next });
+  };
+
+  const fillWithCivilians = () => {
+    const specials = totalSlots - config.civil;
+    changeRoles({ ...config, civil: Math.max(0, players.length - specials) });
+  };
+
+  const handleKick = (player: PlayerState) => {
+    setConfirm({
+      title: `Ukloniti ${player.name}?`,
+      message: started ? 'Igrač će biti uklonjen iz igre koja je u tijeku.' : undefined,
+      confirmLabel: 'Ukloni',
+      danger: true,
+      onConfirm: () => run('kick-player', { playerId: player.id }),
+    });
+  };
+
+  const handleStart = async () => {
+    setIsStarting(true);
+    await run('start-game');
+    setIsStarting(false);
+  };
+
+  const handleStop = () => {
+    if (state.winner) {
+      run('restart-game');
+      return;
+    }
+    setConfirm({
+      title: 'Zaustaviti igru?',
+      message: 'Uloge će se poništiti i svi se vraćaju u sobu.',
+      confirmLabel: 'Zaustavi',
+      danger: true,
+      onConfirm: () => run('restart-game'),
+    });
+  };
+
+  const startLabel = isStarting
+    ? 'Pokrećem...'
+    : configError
+      ? 'Neispravne uloge'
+      : missing > 0
+        ? `Čekamo još ${missing} igrača`
+        : missing < 0
+          ? `Previše igrača (${-missing}) — dodaj uloge`
+          : 'Pokreni igru';
 
   return (
     <div className="page lobby-page">
-      <button 
-        className="back-button" 
-        onClick={isHost ? handleDeleteGame : handleLeaveGame}
-      >
-        <img src={leftArrowSvg} alt="Nazad" className="back-arrow-icon" />
-      </button>
-      
+      <BackButton onClick={handleBack} label={isHost ? 'Zatvori sobu' : 'Napusti sobu'} />
+
       <div className="container">
-        <div className="room-code-display">
+        <div className={`room-code-display ${started ? 'room-code-compact' : ''}`}>
           <div className="room-code-label">Kod sobe</div>
-          <div className="room-code animate-glow">{code}</div>
-          
-          <div className="share-buttons">
-            <button className="btn btn-secondary btn-small" onClick={handleCopyCode}>
-              {copied ? '✓ Kopirano!' : '📋 Kopiraj kod'}
-            </button>
-          </div>
-        </div>
+          <div className="room-code">{code}</div>
 
-        <div className="players-section">
-          <h2>Igrači ({players.length}/{totalSlots})</h2>
-          
-          <div className="players-list">
-            {players.map((player) => (
-              <div key={player.id} className="player-item">
-                <div className="player-avatar">
-                  {player.name.charAt(0).toUpperCase()}
-                </div>
-                <span className="player-name">{player.name}</span>
-                {player.id === hostId && <span className="player-host">Host</span>}
-                {gameStarted && isHost && player.role && (
-                  <span className={`player-role role-tag-${player.role}`}>
-                    {ROLE_ICONS[player.role]} {player.role.charAt(0).toUpperCase() + player.role.slice(1)}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {!gameStarted && players.length < totalSlots && (
-            <div className="waiting-status">
-              <span>Čekanje igrača...</span>
+          {!started && (
+            <div className="share-buttons">
+              <button type="button" className="btn btn-secondary btn-small" onClick={handleShare}>
+                {copied === 'link' ? '✓ Poveznica kopirana' : '🔗 Podijeli'}
+              </button>
+              <button type="button" className="btn btn-secondary btn-small" onClick={handleCopyCode}>
+                {copied === 'code' ? '✓ Kopirano' : '📋 Kopiraj kod'}
+              </button>
             </div>
           )}
         </div>
 
-        {isHost && !gameStarted && (
-          <button 
-            className="btn btn-primary"
-            onClick={handleStartGame}
-            disabled={!canStart || isStarting}
-          >
-            {isStarting ? 'Pokrećem...' : canStart ? 'Pokreni Igru' : `Čekaj još ${totalSlots - players.length} igrača`}
-          </button>
+        {isHost && started ? (
+          <NarratorPanel state={state} onToggleDead={p => run('set-dead', { playerId: p.id, dead: !p.dead })} />
+        ) : (
+          <div className="players-section">
+            <h2>
+              Igrači ({players.length}/{totalSlots})
+            </h2>
+
+            <div className="players-list">
+              {players.map(player => (
+                <div key={player.id} className={`player-item ${player.connected ? '' : 'player-offline'}`}>
+                  <div className="player-avatar">
+                    {player.name.charAt(0).toUpperCase()}
+                    <span className={`status-dot ${player.connected ? 'online' : 'offline'}`} />
+                  </div>
+                  <span className="player-name">
+                    {player.name}
+                    {player.id === state.you?.id && <span className="player-you"> (ti)</span>}
+                  </span>
+                  {!player.connected && <span className="player-status">nije spojen</span>}
+                  {isHost && (
+                    <button
+                      type="button"
+                      className="kick-button"
+                      onClick={() => handleKick(player)}
+                      aria-label={`Ukloni ${player.name}`}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+              {Array.from({ length: Math.max(0, missing) }, (_, i) => (
+                <div key={`empty-${i}`} className="player-item player-empty">
+                  <div className="player-avatar">?</div>
+                  <span className="player-name">Slobodno mjesto</span>
+                </div>
+              ))}
+            </div>
+
+            {!isHost && (
+              <div className="waiting-status">
+                <span>{missing > 0 ? 'Čekanje igrača...' : 'Čekamo da voditelj pokrene igru...'}</span>
+              </div>
+            )}
+          </div>
         )}
 
-        {isHost && gameStarted && (
-          <button 
-            className="btn btn-danger"
-            onClick={handleStopGame}
-          >
-            🛑 Zaustavi igru
-          </button>
+        {isHost && !started && (
+          <div className="role-editor">
+            <button
+              type="button"
+              className="role-editor-toggle"
+              onClick={() => setShowRoles(v => !v)}
+              aria-expanded={showRoles}
+            >
+              <span className="role-summary">
+                {ROLES.filter(r => config[r.key] > 0).map(r => (
+                  <span key={r.key}>
+                    {r.icon} {config[r.key]}
+                  </span>
+                ))}
+              </span>
+              <span>{showRoles ? 'Gotovo' : 'Uredi uloge'}</span>
+            </button>
+
+            {showRoles && <RoleCounter config={config} onChange={changeRoles} />}
+
+            {missing !== 0 && players.length > 0 && (
+              <button type="button" className="btn btn-secondary btn-small" onClick={fillWithCivilians}>
+                👤 Popuni civilima ({players.length} igrača)
+              </button>
+            )}
+
+            {configError && <p className="form-error" role="alert">{configError}</p>}
+          </div>
         )}
+
+        {error && <p className="form-error" role="alert">{error}</p>}
       </div>
+
+      {isHost && (
+        <div className="action-bar">
+          {!started && offlineCount > 0 && missing === 0 && (
+            <p className="action-hint">Nespojenih igrača: {offlineCount}</p>
+          )}
+          {started ? (
+            <button
+              type="button"
+              className={`btn ${state.winner ? 'btn-primary' : 'btn-danger'}`}
+              onClick={handleStop}
+            >
+              {state.winner ? '🔁 Nova runda' : '🛑 Zaustavi igru'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleStart}
+              disabled={!canStart || isStarting}
+            >
+              {startLabel}
+            </button>
+          )}
+        </div>
+      )}
+
+      <ConfirmModal options={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }
